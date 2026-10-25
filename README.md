@@ -58,3 +58,7 @@ To view it locally, serve the folder from a local HTTP server (for example `pyth
 
 ### Zombie image visibility
 The custom wide zombie texture is embedded inside `game.js` for reliability on GitHub Pages. `assets/zombie_wide.png` is also included as an editable standalone asset. The lobby displays a thumbnail and the first zombie of each round enters the main hallway in front of the starting position; later zombies appear elsewhere around the map. Re-upload **both** `game.js` and `index.html` when updating an existing deployment, and force-refresh the page to clear cached scripts.
+
+## Round 5: VIP boss
+
+A unique VIP boss joins the fifth round alongside normal zombies. His custom transparent photo sprite is in `vip_boss.webp` (an optimised version of the provided image), and all players see the same boss through host-authoritative PeerJS state snapshots. He has extra health scaling with co-op player count, a shared boss health bar, and rotating spoken/on-screen catchphrases (“I Tell yA” and “I'm don't like sunday dinners”). His eye lasers warn and charge before firing, deal line-of-sight damage, and can be dodged by moving behind a wall. Defeating VIP awards 2,000 points to the player who lands the final blow. Spoken lines depend on the browser's speech-synthesis support and audio setting.
