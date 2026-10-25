@@ -27,6 +27,16 @@ const MW=map[0].length,MH=map.length;
 const stations=[{x:5.4,y:9.5,type:'smg',label:'MP-40',price:1000},{x:15.3,y:12.5,type:'shotgun',label:'TRENCH GUN',price:1500},{x:11.7,y:6.5,type:'box',label:'MYSTERY BOX',price:950},{x:3.5,y:15.5,type:'perk',label:'FORTIFIED PERK',price:2500}];
 const guns={pistol:{name:'M1911',size:12,reserve:96,damage:42,rate:.29,reload:1.35,spread:.017,pellets:1},smg:{name:'MP-40',size:32,reserve:192,damage:32,rate:.11,reload:1.85,spread:.042,pellets:1},shotgun:{name:'TRENCH GUN',size:8,reserve:56,damage:24,rate:.78,reload:2.15,spread:.18,pellets:7},rifle:{name:'COMMANDO',size:35,reserve:210,damage:48,rate:.145,reload:1.75,spread:.019,pellets:1},lmg:{name:'RPK',size:75,reserve:300,damage:37,rate:.095,reload:2.9,spread:.058,pellets:1},ray:{name:'RAY PROTOTYPE',size:20,reserve:120,damage:170,rate:.31,reload:1.8,spread:.014,pellets:1}};
 let state='menu',player,zombies=[],particles=[],drops=[],points=500,kills=0,round=0,waveTotal=0,waveSpawned=0,waveDelay=0,roundGap=0,roundNotice=0,gun='pistol',ammo=12,reserve=96,shotCooldown=0,reloadTime=0,shotKick=0,flash=0,hurt=0,shake=0,interactNotice='',interactTime=0,aimBobbing=0,held={},last=0,mouseHeld=false,isDragging=false,prevMouse=0,audioEnabled=true,audioCtx=null,flow=[],flowTick=0,elapsed=0,mutedByBrowser=false;
+// Host-controlled wave types and timed power-ups (synced to co-op clients).
+const isDogRound=n=>n>=5&&n%5===0&&n!==10;
+const DROP_TYPES=['maxammo','doublepoints','instakill','nuke'];
+const DROP_META={
+ maxammo:{label:'MAX AMMO',glyph:'AMMO',color:'#58d8fd'},
+ doublepoints:{label:'DOUBLE POINTS',glyph:'2X',color:'#ffe18b'},
+ instakill:{label:'INSTA-KILL',glyph:'SKULL',color:'#f16d6b'},
+ nuke:{label:'NUKE',glyph:'NUKE',color:'#c2ff86'}
+};
+let powerUps={doublePoints:0,instaKill:0},lightningFlash=0,dropSequence=0;
 const VIP_QUOTES=["I Tell yA","I'm don't like sunday dinners"];
 function vipVoice(line){
   if(!audioEnabled||typeof speechSynthesis==='undefined'||typeof SpeechSynthesisUtterance==='undefined')return;
@@ -72,9 +82,19 @@ function menu(kind){if(kind==='dead'){running=false;localPaused=true;state='dead
 function soundError(err){say('Connection error: '+(err?.type||err?.message||err));}
 function closeNetwork(){if(peer){try{peer.destroy()}catch(e){}}peer=null;guestConns.clear();remotePlayers.clear();otherPlayers.clear();hostConn=null;role='none';running=false;roomCode='';statusRoom()}
 function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,kills:0,gun:'pistol',slot,lastFire:-99}}
-function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();points=500;kills=0;round=0;gun='pistol';ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
+function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;points=500;kills=0;round=0;gun='pistol';ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
 function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,kills:0,gun:'pistol',stamina:100,lastFire:-99})}
-function newWave(){round++;waveTotal=4+round*3+(Math.max(0,allActors().length-1)*3);waveSpawned=0;waveDelay=1.3;roundGap=0;roundNotice=3.3;for(let a of allActors())if(!a.downed)a.health=Math.min(a.maxHealth,a.health+30);sound(95,.7,'triangle',.12,140);if(role==='host')notice('ROUND '+round+' — FIGHT TOGETHER',2.4);if(round===5)spawnVip()}
+function newWave(){
+ round++;
+ const dogWave=isDogRound(round);
+ waveTotal=dogWave?Math.min(24,9+round+Math.max(0,allActors().length-1)*2):4+round*3+Math.max(0,allActors().length-1)*3;
+ waveSpawned=0;waveDelay=dogWave?.85:1.3;roundGap=0;roundNotice=3.3;
+ for(const a of allActors())if(!a.downed)a.health=Math.min(a.maxHealth,a.health+30);
+ sound(dogWave?70:95,.7,'triangle',.12,140);
+ notice(dogWave?'HELLHOUND ROUND — WATCH THE LIGHTNING!':'ROUND '+round+' — FIGHT TOGETHER',3.2);
+ if(dogWave){lightningFlash=.75;broadcast({t:'notice',message:'ROUND '+round+' — HELLHOUNDS INCOMING!'});}
+ if(round===10)spawnVip();
+}
 function getCells(){let cells=[];const living=allActors().filter(a=>!a.downed);for(let y=1;y<MH-1;y++)for(let x=1;x<MW-1;x++)if(!solid(x+.5,y+.5)&&living.every(a=>Math.hypot(x+.5-a.x,y+.5-a.y)>4.5))cells.push([x+.5,y+.5]);return cells}
 function spawnVip(){
   const cells=getCells();const preferred=[12.5,10.5];
@@ -84,10 +104,16 @@ function spawnVip(){
     speed:.63,attack:.85,anim:0,groan:99,laserCooldown:3.6,laserCharge:0,laserFx:0,
     laserTargetX:spot[0],laserTargetY:spot[1],quote:VIP_QUOTES[0],quoteLeft:4,quoteCooldown:7,quoteSerial:1});
   notice('WARNING — THE VIP HAS ARRIVED!',4);
-  broadcast({t:'notice',message:'ROUND 5: THE VIP HAS ARRIVED!'});
+  broadcast({t:'notice',message:'ROUND 10: THE VIP HAS ARRIVED!'});
   sound(120,1.1,'sawtooth',.13,-85);vipVoice(VIP_QUOTES[0]);
 }
-function spawn(){const cells=getCells();if(!cells.length)return;let [x,y]=cells[Math.floor(Math.random()*cells.length)];/* The first enemy of each wave enters the central hallway in plain sight. */if(waveSpawned===0&&canStand(12.5,10.5,.23)&&allActors().every(a=>Math.hypot(12.5-a.x,10.5-a.y)>1.25)){x=12.5;y=10.5}let health=77+round*23;zombies.push({id:++hostSequence,x:x+rand(-.09,.09),y:y+rand(-.09,.09),health,maxHealth:health,speed:rand(.55,.73)+Math.min(round*.095,.55),attack:rand(.1,.7),anim:rand(0,TAU),variant:Math.floor(rand(0,3)),groan:rand(1,6)})}
+function spawn(){const cells=getCells();if(!cells.length)return;let [x,y]=cells[Math.floor(Math.random()*cells.length)];/* The first enemy of each wave enters the central hallway in plain sight. */if(waveSpawned===0&&canStand(12.5,10.5,.23)&&allActors().every(a=>Math.hypot(12.5-a.x,10.5-a.y)>1.25)){x=12.5;y=10.5}const dog=isDogRound(round),health=dog?(62+round*12):(77+round*23);
+ if(dog){lightningFlash=Math.max(lightningFlash,.55);sound(95,.20,'sawtooth',.045,-45)}
+ zombies.push({id:++hostSequence,dog,x:x+rand(-.09,.09),y:y+rand(-.09,.09),health,maxHealth:health,
+ speed:dog?Math.min(2.15,1.38+round*.023):rand(.55,.73)+Math.min(round*.095,.55),
+ attack:rand(.1,.7),anim:rand(0,TAU),variant:Math.floor(rand(0,3)),
+ groan:rand(1,6),arrivalFx:dog?.72:0});
+}
 function computeFlow(){flow=Array.from({length:MH},()=>Array(MW).fill(9999));let q=[],at=0;for(let p of allActors().filter(v=>!v.downed)){let sx=Math.floor(p.x),sy=Math.floor(p.y);if(!solid(sx+.5,sy+.5)&&flow[sy][sx]>0){q.push([sx,sy]);flow[sy][sx]=0}}while(at<q.length){const [x,y]=q[at++];for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){let nx=x+dx,ny=y+dy;if(nx>0&&ny>0&&nx<MW-1&&ny<MH-1&&!solid(nx+.5,ny+.5)&&flow[ny][nx]===9999){flow[ny][nx]=flow[y][x]+1;q.push([nx,ny])}}}}
 function setGameOver(){if(!running)return;running=false;broadcast({t:'gameover',round});menu('dead')}
 function updateVip(z,target,dt){
@@ -121,21 +147,61 @@ function updateVip(z,target,dt){
   }
   return false;
 }
+function spawnDrop(x,y,kind=null,guaranteed=false){
+ if(!isHost()||(!guaranteed&&(drops.length>=5||Math.random()>.115)))return;
+ const type=kind||DROP_TYPES[Math.floor(Math.random()*DROP_TYPES.length)];
+ drops.push({id:++dropSequence,x,y,kind:type,ttl:guaranteed?24:19});
+}
+function awardZombiePoints(id,base){addPoints(id,base*(powerUps.doublePoints>0?2:1))}
+function collectDrop(drop,actor){
+ if(!DROP_META[drop.kind]||!isHost())return;
+ const type=drop.kind;
+ if(type==='maxammo'){
+   ammo=guns[gun].size;reserve=guns[gun].reserve;reloadTime=0;
+   for(const p of remotePlayers.values()){
+     sendToId(p.id,{t:'maxammo',gun:p.gun});
+   }
+ }else if(type==='doublepoints')powerUps.doublePoints=30;
+ else if(type==='instakill')powerUps.instaKill=22;
+ else if(type==='nuke'){
+   zombies.length=0;
+   for(const a of allActors())addPoints(a.id,400);
+ }
+ const message=DROP_META[type].label+' ACTIVATED BY '+actor.name.toUpperCase();
+ notice(message,3);broadcast({t:'notice',message});
+ sound(type==='nuke'?90:420,.45,type==='nuke'?'sawtooth':'triangle',.16,type==='nuke'?-70:280);
+}
+function tickDrops(dt){
+ for(let i=drops.length-1;i>=0;i--){
+  const d=drops[i];d.ttl-=dt;
+  if(d.ttl<=0){drops.splice(i,1);continue}
+  const actor=allActors().find(a=>!a.downed&&dist(a,d)<.82);
+  if(actor){drops.splice(i,1);collectDrop(d,actor);}
+ }
+}
 function hostZombies(dt){let living=allActors().filter(a=>!a.downed);if(!living.length){setGameOver();return}
 flowTick-=dt;if(flowTick<=0){computeFlow();flowTick=.33}
-for(let i=zombies.length-1;i>=0;i--){let z=zombies[i],target=living.reduce((a,b)=>dist(z,a)<dist(z,b)?a:b);let d=dist(z,target);z.anim+=dt*(3+z.speed);z.groan-=dt;if(z.groan<0&&d<6){sound(rand(66,92),rand(.3,.6),'sawtooth',.013,-38);z.groan=rand(5,11)}
+for(let i=zombies.length-1;i>=0;i--){let z=zombies[i],target=living.reduce((a,b)=>dist(z,a)<dist(z,b)?a:b);let d=dist(z,target);z.anim+=dt*(3+z.speed);z.arrivalFx=Math.max(0,(z.arrivalFx||0)-dt);z.groan-=dt;
+ if(z.groan<0&&d<6){sound(z.dog?rand(160,205):rand(66,92),rand(.3,.6),'sawtooth',.013,-38);z.groan=rand(z.dog?3:5,z.dog?6:11)}
 if(z.vip&&updateVip(z,target,dt))continue;
-if(d<.76){z.attack-=dt;if(z.attack<=0){target.health=Math.max(0,target.health-(target.perk?(z.vip?20:13):(z.vip?28:17)));target.regen=4;if(target===player){hurt=.95;shake=.5}sound(110,.18,'square',.11,-90);z.attack=1.12;if(target.health<=0){target.downed=true;target.health=0;notice(target.name+' IS DOWN — PRESS E TO REVIVE!',3)}}continue}
+if(d<(z.dog?.86:.76)){z.attack-=dt;if(z.attack<=0){target.health=Math.max(0,target.health-(target.perk?(z.vip?20:z.dog?10:13):(z.vip?28:z.dog?16:17)));target.regen=4;if(target===player){hurt=.95;shake=.5}sound(110,.18,'square',.11,-90);z.attack=z.dog?.82:1.12;if(target.health<=0){target.downed=true;target.health=0;notice(target.name+' IS DOWN — PRESS E TO REVIVE!',3)}}continue}
 let gx=target.x,gy=target.y;if(d>1.7){let cx=Math.floor(z.x),cy=Math.floor(z.y),best=flow[cy]?.[cx]??9999;for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){let nx=cx+dx,ny=cy+dy,v=flow[ny]?.[nx]??9999;if(v<best){best=v;gx=nx+.5;gy=ny+.5}}}let vx=gx-z.x,vy=gy-z.y,len=Math.hypot(vx,vy)||1,s=z.speed*dt;if(canStand(z.x+vx/len*s,z.y+vy/len*s,.20))moveObj(z,vx/len*s,vy/len*s,.20);else{let vx2=target.x-z.x,vy2=target.y-z.y,l2=Math.hypot(vx2,vy2)||1;moveObj(z,vx2/l2*s,vy2/l2*s,.19)}}
 for(let a of living){a.regen=Math.max(0,a.regen-dt);if(!a.regen)a.health=Math.min(a.maxHealth,a.health+8*dt)}
-if(waveSpawned<waveTotal){waveDelay-=dt;if(waveDelay<=0&&zombies.length<Math.min(11+round*2+allActors().length*2,36)){spawn();waveSpawned++;waveDelay=clamp(1.55-round*.07,.5,1.55)}}else if(zombies.length===0){if(!roundGap){roundGap=4.2;notice('ROUND CLEARED — PREPARE YOURSELF',3.5);sound(280,.4,'sine',.08,90)}roundGap-=dt;if(roundGap<=0)newWave()}}
+tickDrops(dt);
+ if(waveSpawned<waveTotal){waveDelay-=dt;if(waveDelay<=0&&zombies.length<Math.min(11+round*2+allActors().length*2,36)){spawn();waveSpawned++;waveDelay=isDogRound(round)?.77:clamp(1.55-round*.07,.5,1.55)}}else if(zombies.length===0){if(!roundGap){roundGap=4.2;notice('ROUND CLEARED — PREPARE YOURSELF',3.5);sound(280,.4,'sine',.08,90)}roundGap-=dt;if(roundGap<=0)newWave()}}
 function update(dt){if(!running)return;elapsed+=dt;
 if(!localPaused&&state==='play'){let p=player,mx=0,my=0,forward=(held.KeyW?1:0)-(held.KeyS?1:0),strafe=(held.KeyD?1:0)-(held.KeyA?1:0);if(!p.downed&&(forward||strafe)){let l=Math.hypot(forward,strafe);forward/=l;strafe/=l;mx=Math.cos(p.ang)*forward-Math.sin(p.ang)*strafe;my=Math.sin(p.ang)*forward+Math.cos(p.ang)*strafe;let fast=held.ShiftLeft&&p.stamina>0&&forward>0,speed=fast?4.1:2.55;moveObj(p,mx*speed*dt,my*speed*dt,.23);if(fast)p.stamina=Math.max(0,p.stamina-32*dt);else p.stamina=Math.min(100,p.stamina+19*dt);aimBobbing+=dt*(fast?13:8)}else p.stamina=Math.min(100,p.stamina+24*dt);if(held.ArrowLeft)p.ang-=1.9*dt;if(held.ArrowRight)p.ang+=1.9*dt;p.ang=normAng(p.ang)}
 shotCooldown=Math.max(0,shotCooldown-dt);flash=Math.max(0,flash-dt);shotKick=Math.max(0,shotKick-dt*5);hurt=Math.max(0,hurt-dt*1.6);shake=Math.max(0,shake-dt*3);interactTime=Math.max(0,interactTime-dt);roundNotice=Math.max(0,roundNotice-dt);
 if(reloadTime>0){reloadTime-=dt;if(reloadTime<=0){const take=Math.min(guns[gun].size-ammo,reserve);ammo+=take;reserve-=take;sound(530,.07,'square',.025,-210)}}
 if(!localPaused&&mouseHeld&&!player.downed&&shotCooldown<=0&&reloadTime<=0)fire();
 for(let i=particles.length-1;i>=0;i--){let e=particles[i];e.life-=dt;e.x+=e.vx*dt;e.y+=e.vy*dt;e.vy+=e.gravity*dt;if(e.life<=0)particles.splice(i,1)}
-if(isHost())hostZombies(dt);else for(let z of zombies){if(z.tx!==undefined){z.x+=(z.tx-z.x)*Math.min(1,dt*15);z.y+=(z.ty-z.y)*Math.min(1,dt*15);z.anim+=dt*4;if(z.vip){z.quoteLeft=Math.max(0,(z.quoteLeft||0)-dt);z.laserCharge=Math.max(0,(z.laserCharge||0)-dt);z.laserFx=Math.max(0,(z.laserFx||0)-dt)}}}
+if(isHost()){
+  powerUps.doublePoints=Math.max(0,powerUps.doublePoints-dt);
+  powerUps.instaKill=Math.max(0,powerUps.instaKill-dt);
+  lightningFlash=Math.max(0,lightningFlash-dt*1.8);
+  hostZombies(dt);
+ }else{lightningFlash=Math.max(0,lightningFlash-dt*1.8)}
+ if(!isHost())for(let z of zombies){if(z.tx!==undefined){z.x+=(z.tx-z.x)*Math.min(1,dt*15);z.y+=(z.ty-z.y)*Math.min(1,dt*15);z.anim+=dt*4;if(z.dog)z.arrivalFx=Math.max(0,(z.arrivalFx||0)-dt);if(z.vip){z.quoteLeft=Math.max(0,(z.quoteLeft||0)-dt);z.laserCharge=Math.max(0,(z.laserCharge||0)-dt);z.laserFx=Math.max(0,(z.laserFx||0)-dt)}}}
 if(role==='guest'&&state==='play'&&hostConn?.open){lastPositionSend+=dt;if(lastPositionSend>=.065){lastPositionSend=0;sendHost({t:'pose',x:player.x,y:player.y,ang:player.ang})}}
 if(role==='host'){lastSnapshot+=dt;if(lastSnapshot>=.10){lastSnapshot=0;broadcastState()}}
 }
@@ -169,6 +235,9 @@ customZombieTex.onerror=()=>{
 };
 customZombieTex.src=ZOMBIE_ASSET;
 const ZOMBIE_WIDTH=1.1085,ZOMBIE_HEIGHT=1.13;
+const dogTex=new Image();dogTex.src='hellhound.webp?v=20261025-dogs-v1';
+dogTex.onerror=()=>console.error('Hellhound sprite could not be loaded: hellhound.webp');
+const DOG_WIDTH=1.16,DOG_HEIGHT=1.12;
 const vipTex=new Image();vipTex.src='vip_boss.webp?v=20261025';
 vipTex.onerror=()=>console.error('VIP boss sprite could not be loaded: vip_boss.webp');
 const VIP_WIDTH=1.5,VIP_HEIGHT=1.79;
@@ -208,10 +277,49 @@ function drawVipLaser(z){
 function drawWorld(){proj=[];for(let z of zombies){let p=screenOf(z.x,z.y);if(p.depth>.1)proj.push({depth:p.depth,type:'z',obj:z})}
 let pals=isHost()?Array.from(remotePlayers.values()):Array.from(otherPlayers.values());for(let p0 of pals){if(p0.id===peer?.id||p0.id==='host'&&isHost())continue;let p=screenOf(p0.x,p0.y);if(p.depth>.1)proj.push({depth:p.depth,type:'p',obj:p0})}
 for(let s of stations){let p=screenOf(s.x,s.y);if(p.depth>.1)proj.push({depth:p.depth,type:'s',obj:s})}
-proj.sort((a,b)=>b.depth-a.depth);for(let e of proj){if(e.type==='z'){e.obj.rect=drawSprite(e.obj.vip?(vipTex.naturalWidth?vipTex:null):currentZombieTexture(e.obj),e.obj,e.obj.vip?VIP_HEIGHT:ZOMBIE_HEIGHT,e.obj.vip?VIP_WIDTH:ZOMBIE_WIDTH,Math.sin(e.obj.anim)*2)}else if(e.type==='p'){let p=e.obj;let hit=drawSprite(mateTex[p.slot%4],p,p.downed?.38:1.08,.59,p.downed?6:Math.sin(elapsed*3)*1.5);if(hit){let sy=Math.max(24,hit.y-15);ctx.save();ctx.textAlign='center';ctx.font='bold '+clamp(160/hit.depth,11,20)+'px monospace';ctx.fillStyle=p.downed?'#ff6969':'#a5f4e4';ctx.shadowColor='#000';ctx.shadowBlur=5;ctx.fillText(p.downed?'REVIVE '+p.name:p.name,hit.x,sy);ctx.restore()}}else e.obj.rect=drawSprite(stationTex[e.obj.type],e.obj,.86,.66,0)}
+proj.sort((a,b)=>b.depth-a.depth);for(let e of proj){if(e.type==='z'){e.obj.rect=drawSprite(e.obj.vip?(vipTex.naturalWidth?vipTex:null):e.obj.dog?(dogTex.naturalWidth?dogTex:null):currentZombieTexture(e.obj),e.obj,e.obj.vip?VIP_HEIGHT:e.obj.dog?DOG_HEIGHT:ZOMBIE_HEIGHT,e.obj.vip?VIP_WIDTH:e.obj.dog?DOG_WIDTH:ZOMBIE_WIDTH,Math.sin(e.obj.anim)*2)}else if(e.type==='p'){let p=e.obj;let hit=drawSprite(mateTex[p.slot%4],p,p.downed?.38:1.08,.59,p.downed?6:Math.sin(elapsed*3)*1.5);if(hit){let sy=Math.max(24,hit.y-15);ctx.save();ctx.textAlign='center';ctx.font='bold '+clamp(160/hit.depth,11,20)+'px monospace';ctx.fillStyle=p.downed?'#ff6969':'#a5f4e4';ctx.shadowColor='#000';ctx.shadowBlur=5;ctx.fillText(p.downed?'REVIVE '+p.name:p.name,hit.x,sy);ctx.restore()}}else e.obj.rect=drawSprite(stationTex[e.obj.type],e.obj,.86,.66,0)}
 for(const z of zombies)if(z.vip)drawVipLaser(z);
 }
 
+function drawDrops(){
+ for(const drop of drops){
+   const p=screenOf(drop.x,drop.y),depth=p.depth;
+   if(depth<=.1||depth>17||!DROP_META[drop.kind])continue;
+   const ix=Math.floor(p.x/SW);if(ix<0||ix>=zBuffer.length||zBuffer[ix]<depth-.2)continue;
+   const meta=DROP_META[drop.kind],size=clamp(85/depth,19,70),y=HF+H/(2*depth)-size*1.3+Math.sin(elapsed*3+drop.id)*9;
+   ctx.save();ctx.shadowColor=meta.color;ctx.shadowBlur=22;
+   ctx.fillStyle='#071010d9';ctx.strokeStyle=meta.color;ctx.lineWidth=3;
+   ctx.beginPath();ctx.arc(p.x,y,size*.54,0,TAU);ctx.fill();ctx.stroke();
+   ctx.font='bold '+Math.round(size*.28)+'px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=meta.color;
+   ctx.fillText(meta.glyph,p.x,y);
+   ctx.font='bold '+Math.round(clamp(size*.20,10,15))+'px monospace';ctx.fillText(meta.label,p.x,y+size*.75);
+   ctx.restore();
+ }
+}
+function dogWeather(){
+ if(!isDogRound(round)||!running)return;
+ ctx.save();
+ ctx.fillStyle='rgba(1,6,15,.55)';ctx.fillRect(0,0,W,H);
+ // Layers of moving blue-grey mist and a pale horizon.
+ for(let i=0;i<4;i++){
+   const cx=W*(.13+i*.26)+Math.sin(elapsed*.29+i*2)*115;
+   const cy=HF+48+i*35+Math.sin(elapsed*.48+i)*16;
+   const cloud=ctx.createRadialGradient(cx,cy,8,cx,cy,275);
+   cloud.addColorStop(0,'rgba(155,194,207,.19)');cloud.addColorStop(1,'rgba(50,75,95,0)');
+   ctx.fillStyle=cloud;ctx.fillRect(0,0,W,H);
+ }
+ for(const dog of zombies){
+  if(!dog.dog||!dog.arrivalFx||!dog.rect)continue;
+  const r=dog.rect;
+  if(r.depth<=.1||r.depth>16)continue;
+  ctx.save();ctx.globalAlpha=clamp(dog.arrivalFx*2,0,1);
+  ctx.strokeStyle='#e1f7ff';ctx.lineWidth=clamp(10/r.depth,2,8);ctx.shadowColor='#bdeeff';ctx.shadowBlur=22;
+  ctx.beginPath();ctx.moveTo(r.x-22,0);ctx.lineTo(r.x+8,r.y*.22);ctx.lineTo(r.x-15,r.y*.58);ctx.lineTo(r.x+5,Math.max(0,r.y+r.height*.42));ctx.stroke();
+  ctx.restore();
+ }
+ if(lightningFlash>0){ctx.fillStyle='rgba(195,225,255,'+(clamp(lightningFlash*.65,0,.55))+')';ctx.fillRect(0,0,W,H)}
+ ctx.restore();
+}
 function gunDraw(){let bob=Math.sin(aimBobbing)*3,side=Math.cos(aimBobbing/2)*2;ctx.save();ctx.translate(W/2+side+shotKick*26,H+19+shotKick*38+bob);let compact=gun==='pistol'||gun==='ray';ctx.scale(compact?.8:1,compact?.8:1);
 // hands and sleeves
 ctx.fillStyle='#27312c';ctx.beginPath();ctx.moveTo(-176,50);ctx.lineTo(-94,-84);ctx.lineTo(-27,-64);ctx.lineTo(-59,70);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(166,70);ctx.lineTo(101,-77);ctx.lineTo(35,-70);ctx.lineTo(56,70);ctx.closePath();ctx.fill();ctx.fillStyle='#938777';ctx.beginPath();ctx.ellipse(-61,-84,27,23,.5,0,TAU);ctx.fill();ctx.beginPath();ctx.ellipse(64,-75,25,22,-.5,0,TAU);ctx.fill();
@@ -224,12 +332,12 @@ function ui(){const mid=W/2;ctx.save();let down=nearestDown();if(down&&!player.d
 if(interactTime>0){ctx.globalAlpha=clamp(interactTime,0,1);ctx.fillStyle='#080a09cb';ctx.fillRect(mid-280,76,560,36);text(interactNotice,mid,94,17,'#f2d7a9','center','monospace');ctx.globalAlpha=1}
 // crosshair
 const bloom=shotKick*9;ctx.strokeStyle=player.health<30?'#ff7e63':'#efeed9';ctx.lineWidth=2;ctx.globalAlpha=.86;for(let k=0;k<4;k++){let a=k*Math.PI/2,from=8+bloom,to=16+bloom;ctx.beginPath();ctx.moveTo(mid+Math.cos(a)*from,HF+Math.sin(a)*from);ctx.lineTo(mid+Math.cos(a)*to,HF+Math.sin(a)*to);ctx.stroke()}ctx.fillStyle='#fff';ctx.fillRect(mid-1,HF-1,2,2);ctx.globalAlpha=1;
-// Round-five VIP boss health bar and visible catchphrases, shown on every client.
+// Round-ten VIP boss health bar and visible catchphrases, shown on every client.
 const vip=zombies.find(z=>z.vip&&z.health>0);
 if(vip){
   ctx.fillStyle='#100507e8';ctx.fillRect(mid-260,10,520,63);
   ctx.strokeStyle='#e3462d';ctx.lineWidth=2;ctx.strokeRect(mid-260,10,520,63);
-  text('VIP — ROUND 5 BOSS',mid,28,17,'#ffd0b6','center','monospace');
+  text('VIP — ROUND 10 BOSS',mid,28,17,'#ffd0b6','center','monospace');
   ctx.fillStyle='#3c1719';ctx.fillRect(mid-244,43,488,16);
   ctx.fillStyle='#ff5334';ctx.fillRect(mid-244,43,488*clamp(vip.health/Math.max(1,vip.maxHealth),0,1),16);
   text(Math.ceil(vip.health)+' / '+vip.maxHealth,mid,52,12,'#ffffff','center','monospace');
@@ -248,7 +356,13 @@ ctx.fillStyle='#080d0bce';ctx.fillRect(19,H-91,224,70);text(player.perk?'FORTIFI
 // ammo
 ctx.fillStyle='#070d0bdb';ctx.fillRect(W-245,H-105,226,84);text(guns[gun].name,W-229,H-87,13,'#b9c9b9','left','monospace');text(String(ammo),W-229,H-49,39,ammo<=Math.ceil(guns[gun].size*.25)?'#fa856a':'#f9f3dd');text('/ '+reserve,W-122,H-43,24,'#a5ada7');if(reloadTime>0)text('RELOADING…',W-229,H-20,12,'#f0bb83','left','monospace');else if(ammo===0)text('PRESS R TO RELOAD',W-229,H-20,12,'#f0bb83','left','monospace');
 if(player.downed){ctx.fillStyle='#130000a8';ctx.fillRect(0,0,W,H);text('YOU ARE DOWN',W/2,H/2-50,38,'#fa6960','center');text('A TEAMMATE MUST REVIVE YOU',W/2,H/2,17,'#fff5ea','center','monospace')}
-if(roundNotice>0){ctx.globalAlpha=clamp(roundNotice/1.1,0,1);text('ROUND '+round,mid,145,36,'#eaa37b','center');text('SURVIVE THE HORDE',mid,179,12,'#e2dad0','center','monospace');ctx.globalAlpha=1}
+if(roundNotice>0){ctx.globalAlpha=clamp(roundNotice/1.1,0,1);text('ROUND '+round,mid,145,36,'#eaa37b','center');text(isDogRound(round)?'HELLHOUNDS IN THE MIST':'SURVIVE THE HORDE',mid,179,12,'#e2dad0','center','monospace');ctx.globalAlpha=1}
+ let effectY=132;
+ for(const kind of ['doublePoints','instaKill'])if(powerUps[kind]>0){
+   const label=kind==='doublePoints'?'2X POINTS':'INSTA-KILL';
+   text(label+' '+Math.ceil(powerUps[kind])+'s',W-28,effectY,14,kind==='doublePoints'?'#ffdc82':'#ff9a86','right','monospace');
+   effectY+=20;
+ }
 if(hurt>0){ctx.fillStyle='rgba(204,28,13,'+(hurt*.2)+')';ctx.fillRect(0,0,W,H);ctx.strokeStyle='rgba(219,32,17,'+(hurt*.9)+')';ctx.lineWidth=29*hurt;ctx.strokeRect(0,0,W,H)}
 // film grain/scanline texture
 ctx.fillStyle='#00000016';for(let k=0;k<H;k+=4)ctx.fillRect(0,k,W,1);
@@ -279,8 +393,12 @@ for(let z of zombies){let dx=z.x-actor.x,dy=z.y-actor.y,front=dx*forwardX+dy*for
 candidates.sort((a,b)=>a.front-b.front);
 for(let j=0;j<weapon.pellets;j++){let spread=rand(-1,1)*weapon.spread;let ax=Math.cos(angle+spread),ay=Math.sin(angle+spread);
 let hit=candidates.find(c=>{let dx=c.z.x-actor.x,dy=c.z.y-actor.y;return Math.abs(-dx*ay+dy*ax)<(c.z.vip?.55:.32)&&dx*ax+dy*ay>.2});if(!hit)continue;
-let z=hit.z;if(!zombies.includes(z))continue;let head=Math.random()<.19;z.health-=weapon.damage*(head?1.65:1);addPoints(id,10);if(id==='host'){let p=screenOf(z.x,z.y);spawnBlood(clamp(p.x,15,W-15),HF-H*.32/Math.max(.4,p.depth),head)}
-if(z.health<=0){zombies.splice(zombies.indexOf(z),1);addPoints(id,z.vip?2000:(head?150:100));if(z.vip){notice('THE VIP HAS BEEN DEFEATED!',4);broadcast({t:'notice',message:'THE VIP HAS BEEN DEFEATED!'});sound(240,1,'triangle',.19,-190)}if(id==='host')kills++;else{let p=remotePlayers.get(id);if(p)p.kills++}}}
+let z=hit.z;if(!zombies.includes(z))continue;let head=Math.random()<.19;z.health-=powerUps.instaKill>0&&!z.vip?z.health:weapon.damage*(head?1.65:1);awardZombiePoints(id,10);if(id==='host'){let p=screenOf(z.x,z.y);spawnBlood(clamp(p.x,15,W-15),HF-H*.32/Math.max(.4,p.depth),head)}
+if(z.health<=0){zombies.splice(zombies.indexOf(z),1);
+ awardZombiePoints(id,z.vip?2000:(head?150:100));
+ if(z.dog&&isDogRound(round)&&waveSpawned>=waveTotal&&!zombies.some(e=>e.dog))spawnDrop(z.x,z.y,'maxammo',true);
+ else spawnDrop(z.x,z.y);
+if(z.vip){notice('THE VIP HAS BEEN DEFEATED!',4);broadcast({t:'notice',message:'THE VIP HAS BEEN DEFEATED!'});sound(240,1,'triangle',.19,-190)}if(id==='host')kills++;else{let p=remotePlayers.get(id);if(p)p.kills++}}}
 }
 function fire(){if(!gameActive()||localPaused||player.downed||shotCooldown>0||reloadTime>0)return;if(ammo<=0){shotCooldown=.23;sound(650,.02,'square',.025,-200);return}
 ammo--;let w=guns[gun];shotCooldown=w.rate;shotKick=.6;flash=.09;shake=.16;clickSound();
@@ -290,28 +408,36 @@ function attemptRevive(by,targetId){if(!running)return;let a=actorById(by),b=act
 
 function renderParticles(){for(let e of particles){ctx.globalAlpha=clamp(e.life*2,0,1);ctx.fillStyle=e.spark?'#ffce87':e.head?'#f04b2a':'#a3412f';ctx.fillRect(e.x,e.y,e.size,e.size)}ctx.globalAlpha=1}
 
-function render(){if(!player){ctx.fillStyle='#0a100f';ctx.fillRect(0,0,W,H);return}ctx.save();if(shake>0)ctx.translate(rand(-6,6)*shake,rand(-6,6)*shake);wallRender();drawWorld();renderParticles();gunDraw();ui();ctx.restore();status.textContent=role==='none'?'NOT CONNECTED':'ROOM '+roomCode+' · '+(running?'ROUND '+round+' · '+zombies.length+' ZOMBIES':'LOBBY')}
+function render(){if(!player){ctx.fillStyle='#0a100f';ctx.fillRect(0,0,W,H);return}
+ ctx.save();if(shake>0)ctx.translate(rand(-6,6)*shake,rand(-6,6)*shake);
+ wallRender();drawWorld();dogWeather();drawDrops();renderParticles();gunDraw();ui();ctx.restore();
+ status.textContent=role==='none'?'NOT CONNECTED':'ROOM '+roomCode+' · '+(running?'ROUND '+round+' · '+zombies.length+(isDogRound(round)?' HELLHOUNDS':' ZOMBIES'):'LOBBY')}
 function frame(t){let dt=Math.min((t-last)/1000||0,.05);last=t;update(dt);render();requestAnimationFrame(frame)}
 function sendHost(obj){if(hostConn?.open)try{hostConn.send(obj)}catch(e){}}
 function sendToId(id,obj){let c=guestConns.get(id);if(c?.open)try{c.send(obj)}catch(e){}}
 function broadcast(obj){for(let c of guestConns.values())if(c.open)try{c.send(obj)}catch(e){}}
 function statePacket(){return{t:'state',running,round,roundGap,waveSpawned,waveTotal,
+ powerUps:{...powerUps},lightningFlash,
+ drops:drops.map(d=>({id:d.id,x:d.x,y:d.y,kind:d.kind,ttl:d.ttl})),
 zombies:zombies.map(z=>({id:z.id,x:z.x,y:z.y,health:z.health,maxHealth:z.maxHealth,variant:z.variant,anim:z.anim,
-vip:!!z.vip,laserCharge:z.laserCharge||0,laserFx:z.laserFx||0,laserTargetX:z.laserTargetX,laserTargetY:z.laserTargetY,
+vip:!!z.vip,dog:!!z.dog,arrivalFx:z.arrivalFx||0,laserCharge:z.laserCharge||0,laserFx:z.laserFx||0,laserTargetX:z.laserTargetX,laserTargetY:z.laserTargetY,
 quote:z.quote,quoteLeft:z.quoteLeft||0,quoteSerial:z.quoteSerial||0})),
 people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,points:p.points,kills:p.kills,gun:p.gun,slot:p.slot}))}}
 function broadcastState(){broadcast(statePacket())}
 function applySnapshot(s){if(!s||s.t!=='state'||!Array.isArray(s.people)||!Array.isArray(s.zombies))return;
 const previousRound=round;round=s.round;waveSpawned=s.waveSpawned;waveTotal=s.waveTotal;roundGap=s.roundGap;
+ powerUps={doublePoints:Math.max(0,s.powerUps?.doublePoints||0),instaKill:Math.max(0,s.powerUps?.instaKill||0)};
+ lightningFlash=Math.max(lightningFlash,s.lightningFlash||0);
+ drops=Array.isArray(s.drops)?s.drops.filter(d=>DROP_META[d.kind]):[];
 const self=s.people.find(p=>p.id===peer?.id);if(self){if(player.health>self.health)hurt=.8;player.health=self.health;player.maxHealth=self.maxHealth;player.downed=self.downed;player.perk=self.perk;points=self.points;kills=self.kills;if(!running||state==='ready'||state==='lobby'){player.x=self.x;player.y=self.y;player.ang=self.ang}}
 otherPlayers.clear();for(let p of s.people)if(p.id!==peer?.id)otherPlayers.set(p.id,p);
 const existing=new Map(zombies.map(z=>[z.id,z]));let updated=[];for(let z of s.zombies){let old=existing.get(z.id);if(old){if(z.vip&&old.quoteSerial!==z.quoteSerial&&z.quoteLeft>0)vipVoice(z.quote);
-old.tx=z.x;old.ty=z.y;Object.assign(old,{health:z.health,maxHealth:z.maxHealth,variant:z.variant,vip:z.vip,
+old.tx=z.x;old.ty=z.y;Object.assign(old,{health:z.health,maxHealth:z.maxHealth,variant:z.variant,vip:z.vip,dog:z.dog,arrivalFx:z.arrivalFx,
 laserCharge:z.laserCharge,laserFx:z.laserFx,laserTargetX:z.laserTargetX,laserTargetY:z.laserTargetY,
 quote:z.quote,quoteLeft:z.quoteLeft,quoteSerial:z.quoteSerial});updated.push(old)}
 else{if(z.vip&&z.quoteLeft>0)vipVoice(z.quote);updated.push({...z,tx:z.x,ty:z.y})}}zombies=updated;
 if(!running&&s.running){running=true;showReady()}else running=!!s.running;
-if(round!==previousRound&&round>0){roundNotice=3.1;notice('ROUND '+round+' — INCOMING!',2.1)}
+if(round!==previousRound&&round>0){roundNotice=3.1;notice(isDogRound(round)?'HELLHOUND ROUND — WATCH THE LIGHTNING!':'ROUND '+round+' — INCOMING!',2.3)}
 statusRoom()}
 function hostAddGuest(conn,m){if(!conn.open||guestConns.has(conn.peer))return;
 if(guestConns.size>=3){conn.send({t:'reject',message:'ROOM FULL — 4 PLAYER LIMIT'});setTimeout(()=>conn.close(),200);return}
@@ -344,6 +470,7 @@ else if(m.t==='state')applySnapshot(m);
 else if(m.t==='start'){running=true;showReady()}
 else if(m.t==='purchase'){equip(m.gun);reserve=m.reserve;notice(m.notice||'PURCHASE COMPLETE',2)}
 else if(m.t==='refill'){reserve+=m.reserve;notice(m.notice||'AMMUNITION RESTOCKED',2)}
+else if(m.t==='maxammo'){ammo=guns[gun].size;reserve=guns[gun].reserve;reloadTime=0;notice('MAX AMMO!',3)}
 else if(m.t==='notice')notice(String(m.message).slice(0,80),2);
 else if(m.t==='gameover'){round=m.round;menu('dead')}
 else if(m.t==='reject'){say(m.message||'ROOM REJECTED');if(hostConn)hostConn.close()}});
