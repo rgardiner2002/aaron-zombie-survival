@@ -73,3 +73,7 @@ A unique VIP boss joins the tenth round alongside normal zombies. His custom tra
 ## Updated bunker graphics
 
 The canvas now includes perspective-accurate tiled concrete floor detail, weathered wall textures, flickering emergency wall lights, a subtle flashlight-like vignette, muzzle flash illumination, and drifting dust. These are local rendering effects; multiplayer bandwidth is unchanged. The 960×540 base resolution is unchanged to protect performance.
+
+## Pack-a-Punch machine
+
+The neon-purple Pack-a-Punch machine is in the eastern bunker corridor at **(16.5, 5.5)**. Approach it and press **E** to upgrade the currently held gun for **5,000 points**. The upgrade grants **2.25× damage**, a **50% larger magazine and reserve**, faster firing, full ammo, new weapon names, and purple energy accents and muzzle flashes. You can only upgrade each equipped gun once; changing to a different weapon removes the upgrade (this game carries one gun at a time). Pack-a-Punched ammunition scales properly for reloading and Max Ammo power-ups. In online co-op, the host validates each player's distance, points, and current upgrade before completing the purchase and synchronises the result to guests.
