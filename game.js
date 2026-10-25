@@ -164,7 +164,10 @@ function collectDrop(drop,actor){
  }else if(type==='doublepoints')powerUps.doublePoints=30;
  else if(type==='instakill')powerUps.instaKill=22;
  else if(type==='nuke'){
-   zombies.length=0;
+   // Clear regular zombies and dogs, but keep the VIP boss fight intact.
+   zombies=zombies.filter(z=>z.vip);
+   if(isDogRound(round)&&waveSpawned>=waveTotal&&!drops.some(d=>d.kind==='maxammo'))
+     spawnDrop(actor.x,actor.y,'maxammo',true);
    for(const a of allActors())addPoints(a.id,400);
  }
  const message=DROP_META[type].label+' ACTIVATED BY '+actor.name.toUpperCase();
