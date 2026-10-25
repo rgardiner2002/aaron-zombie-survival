@@ -28,7 +28,14 @@ const stations=[{x:5.4,y:9.5,type:'smg',label:'MP-40',price:1000},{x:15.3,y:12.5
 const guns={pistol:{name:'M1911',size:12,reserve:96,damage:42,rate:.29,reload:1.35,spread:.017,pellets:1},smg:{name:'MP-40',size:32,reserve:192,damage:32,rate:.11,reload:1.85,spread:.042,pellets:1},shotgun:{name:'TRENCH GUN',size:8,reserve:56,damage:24,rate:.78,reload:2.15,spread:.18,pellets:7},rifle:{name:'COMMANDO',size:35,reserve:210,damage:48,rate:.145,reload:1.75,spread:.019,pellets:1},lmg:{name:'RPK',size:75,reserve:300,damage:37,rate:.095,reload:2.9,spread:.058,pellets:1},ray:{name:'RAY PROTOTYPE',size:20,reserve:120,damage:170,rate:.31,reload:1.8,spread:.014,pellets:1}};
 let state='menu',player,zombies=[],particles=[],drops=[],points=500,kills=0,round=0,waveTotal=0,waveSpawned=0,waveDelay=0,roundGap=0,roundNotice=0,gun='pistol',ammo=12,reserve=96,shotCooldown=0,reloadTime=0,shotKick=0,flash=0,hurt=0,shake=0,interactNotice='',interactTime=0,aimBobbing=0,held={},last=0,mouseHeld=false,isDragging=false,prevMouse=0,audioEnabled=true,audioCtx=null,flow=[],flowTick=0,elapsed=0,mutedByBrowser=false;
 // Host-controlled wave types and timed power-ups (synced to co-op clients).
-const isDogRound=n=>n>=5&&n%5===0&&n!==10;
+// The host owns the hidden schedule; clients render the current wave from snapshots.
+let nextDogRound=5,activeDogRound=false;
+const isDogRound=n=>n===round&&activeDogRound;
+function scheduleNextDogRound(previousRound){
+  let next=previousRound+5+Math.floor(Math.random()*3);
+  if(next===10)next=11; // Reserve the VIP fight on round ten.
+  nextDogRound=next;
+}
 const DROP_TYPES=['maxammo','doublepoints','instakill','nuke'];
 const DROP_META={
  maxammo:{label:'MAX AMMO',glyph:'AMMO',color:'#58d8fd'},
@@ -82,11 +89,13 @@ function menu(kind){if(kind==='dead'){running=false;localPaused=true;state='dead
 function soundError(err){say('Connection error: '+(err?.type||err?.message||err));}
 function closeNetwork(){if(peer){try{peer.destroy()}catch(e){}}peer=null;guestConns.clear();remotePlayers.clear();otherPlayers.clear();hostConn=null;role='none';running=false;roomCode='';statusRoom()}
 function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,kills:0,gun:'pistol',slot,lastFire:-99}}
-function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;points=500;kills=0;round=0;gun='pistol';ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
+function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;nextDogRound=5;activeDogRound=false;points=500;kills=0;round=0;gun='pistol';ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
 function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,kills:0,gun:'pistol',stamina:100,lastFire:-99})}
 function newWave(){
  round++;
- const dogWave=isDogRound(round);
+ const dogWave=round===nextDogRound;
+ activeDogRound=dogWave;
+ if(dogWave)scheduleNextDogRound(round);
  waveTotal=dogWave?Math.min(24,9+round+Math.max(0,allActors().length-1)*2):4+round*3+Math.max(0,allActors().length-1)*3;
  waveSpawned=0;waveDelay=dogWave?.85:1.3;roundGap=0;roundNotice=3.3;
  for(const a of allActors())if(!a.downed)a.health=Math.min(a.maxHealth,a.health+30);
@@ -215,10 +224,38 @@ for(let count=0;count<28;count++){if(sideX<sideY){sideX+=deltaX;mapX+=stepX;side
 let d=Math.max(.04,side===0?sideX-deltaX:sideY-deltaY),hit=(side===0?player.y+d*rayY:player.x+d*rayX);return{d,u:hit-Math.floor(hit),side,mapX,mapY}}
 const SW=3,zBuffer=new Float32Array(W/SW);let proj=[];
 function screenOf(x,y){let dx=x-player.x,dy=y-player.y,ca=Math.cos(player.ang),sa=Math.sin(player.ang),depth=dx*ca+dy*sa,side=-dx*sa+dy*ca;return{depth,x:W/2+side/(depth*TAN)*W/2}}
+function renderFloorDetail(horizon,ca,sa){
+  // Sample world coordinates on the perspective floor so tile seams move with the player.
+  for(let py=Math.ceil(horizon+20);py<H;py+=10){
+    const depth=H/(2*Math.max(1,py-horizon));
+    if(depth>16)continue;
+    for(let px=0;px<W;px+=16){
+      const side=(px*2/W-1)*TAN;
+      const fx=player.x+depth*(ca-sa*side),fy=player.y+depth*(sa+ca*side);
+      const sx=fx-Math.floor(fx),sy=fy-Math.floor(fy);
+      if(sx<.045||sy<.045){
+        ctx.fillStyle='rgba(3,7,6,'+clamp(.22-depth*.008,.07,.2)+')';
+        ctx.fillRect(px,py,17,2);
+      }else if(Math.sin(fx*73.9+fy*46.1)>.91){
+        ctx.fillStyle='rgba(196,209,182,.055)';ctx.fillRect(px,py,7,1);
+      }
+    }
+  }
+}
 function wallRender(){const horizon=HF+Math.sin(aimBobbing)*2.3;let sky=ctx.createLinearGradient(0,0,0,horizon);sky.addColorStop(0,'#060d10');sky.addColorStop(1,'#1c2728');ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);let floor=ctx.createLinearGradient(0,horizon,0,H);floor.addColorStop(0,'#32342e');floor.addColorStop(.3,'#1b201e');floor.addColorStop(1,'#090e0c');ctx.fillStyle=floor;ctx.fillRect(0,horizon,W,H-horizon);
-ctx.strokeStyle='#b0a8910b';for(let i=1;i<=25;i++){let y=horizon+(H-horizon)*(1-1/(i*.26+1));ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
 let ca=Math.cos(player.ang),sa=Math.sin(player.ang);
-for(let i=0;i<W/SW;i++){let sx=i*SW,cx=2*sx/W-1,rx=ca-sa*cx*TAN,ry=sa+ca*cx*TAN,r=cast(rx,ry);zBuffer[i]=r.d;let height=Math.min(H*4,H/r.d),top=horizon-height/2,bottom=horizon+height/2,lighting=clamp(1-r.d/16,.16,.85)*(r.side?.72:1),grain=(Math.sin(r.u*88+r.mapX*16+r.mapY*23)*.12+.88);let base=[102,114,102],mortar=(r.u<.016||r.u>.984);let c=base.map(v=>Math.round(v*lighting*grain*(mortar?.55:1)));ctx.fillStyle='rgb('+c.join(',')+')';ctx.fillRect(sx,Math.max(0,top),SW+1,Math.min(H,bottom)-Math.max(0,top));
+renderFloorDetail(horizon,ca,sa);
+ctx.strokeStyle='#c0b6a40a';for(let i=1;i<=18;i++){let y=horizon+(H-horizon)*(1-1/(i*.26+1));ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+for(let i=0;i<W/SW;i++){let sx=i*SW,cx=2*sx/W-1,rx=ca-sa*cx*TAN,ry=sa+ca*cx*TAN,r=cast(rx,ry);zBuffer[i]=r.d;let height=Math.min(H*4,H/r.d),top=horizon-height/2,bottom=horizon+height/2,lighting=clamp(1-r.d/17,.13,.91)*(r.side?.68:1),grain=(Math.sin(r.u*88+r.mapX*16+r.mapY*23)*.12+.88);
+let lamp=(r.mapX*5+r.mapY*7)%11===0&&r.u>.29&&r.u<.71;
+let flicker=.92+.08*Math.sin(elapsed*7.2+r.mapX*3),base=lamp?[132,128,104]:[92,108,103];
+let mortar=(r.u<.017||r.u>.983),varied=Math.sin(r.mapX*17.3+r.mapY*31.2+r.u*52)*.07+.94;
+let c=base.map(v=>Math.round(v*lighting*grain*varied*(mortar?.45:1)*(lamp?1.5*flicker:1)));ctx.fillStyle='rgb('+c.join(',')+')';ctx.fillRect(sx,Math.max(0,top),SW+1,Math.min(H,bottom)-Math.max(0,top));
+if(lamp&&height>28){
+const panelY=Math.max(0,top+height*.09),panelH=Math.min(H-panelY,Math.max(2,height*.048));
+ctx.fillStyle='rgba(255,192,95,'+(clamp(.35/r.d,.07,.29)*flicker)+')';
+ctx.fillRect(sx,panelY,SW+1,panelH);
+}
 if(height>34){ctx.fillStyle='rgba(9,14,11,.27)';let lines=Math.min(8,Math.max(2,Math.floor(height/70)));for(let k=1;k<lines;k++){let yy=top+height*k/lines;if(yy>0&&yy<H)ctx.fillRect(sx,yy,SW+1,Math.max(1,height*.006))}let stain=Math.abs(Math.sin(r.mapX*27+r.mapY*17+Math.floor(r.u*7)*3.77));if(stain>.88){ctx.fillStyle='rgba(7,10,8,.25)';ctx.fillRect(sx,Math.max(0,top+height*.16),SW+1,Math.min(height*.43,H))}}
 // Small red safety light spill on selected wall sectors
 if(r.mapX%8===0&&r.mapY%4===0&&r.u>.44&&r.u<.57){ctx.fillStyle='rgba(224,57,30,.2)';ctx.fillRect(sx,Math.max(0,top+height*.14),SW,Math.min(height*.11,H))}
@@ -297,6 +334,28 @@ function drawDrops(){
    ctx.fillText(meta.glyph,p.x,y);
    ctx.font='bold '+Math.round(clamp(size*.20,10,15))+'px monospace';ctx.fillText(meta.label,p.x,y+size*.75);
    ctx.restore();
+ }
+}
+function drawAtmosphere(){
+ // Mobile-friendly flashlight falloff over walls and enemies, but under the HUD.
+ const cx=W*.5+Math.sin(aimBobbing*.16)*8,cy=HF+18;
+ const shade=ctx.createRadialGradient(cx,cy,36,cx,cy,W*.65);
+ shade.addColorStop(0,'rgba(1,6,7,0)');
+ shade.addColorStop(.42,'rgba(0,5,8,.10)');
+ shade.addColorStop(1,'rgba(0,2,5,.62)');
+ ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
+ if(flash>0){
+   const glow=ctx.createRadialGradient(W*.5,H*.66,0,W*.5,H*.66,H*.65);
+   glow.addColorStop(0,'rgba(255,164,82,'+clamp(flash*1.8,0,.2)+')');
+   glow.addColorStop(1,'rgba(255,154,82,0)');
+   ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+ }
+ ctx.fillStyle=isDogRound(round)?'rgba(187,215,233,.23)':'rgba(221,205,162,.19)';
+ for(let i=0;i<26;i++){
+   const seed=i*67.71,x=((seed*19.7+elapsed*(i%4+1)*3)%W+W)%W;
+   const y=((seed*9.3+elapsed*(i%5+1)*2)%H+H)%H;
+   const light=1-Math.min(1,Math.abs(x-W/2)/(W*.65));
+   if(light>.28)ctx.fillRect(x,y,light*1.5,light*1.5);
  }
 }
 function dogWeather(){
@@ -413,13 +472,13 @@ function renderParticles(){for(let e of particles){ctx.globalAlpha=clamp(e.life*
 
 function render(){if(!player){ctx.fillStyle='#0a100f';ctx.fillRect(0,0,W,H);return}
  ctx.save();if(shake>0)ctx.translate(rand(-6,6)*shake,rand(-6,6)*shake);
- wallRender();drawWorld();dogWeather();drawDrops();renderParticles();gunDraw();ui();ctx.restore();
+ wallRender();drawWorld();dogWeather();drawAtmosphere();drawDrops();renderParticles();gunDraw();ui();ctx.restore();
  status.textContent=role==='none'?'NOT CONNECTED':'ROOM '+roomCode+' · '+(running?'ROUND '+round+' · '+zombies.length+(isDogRound(round)?' HELLHOUNDS':' ZOMBIES'):'LOBBY')}
 function frame(t){let dt=Math.min((t-last)/1000||0,.05);last=t;update(dt);render();requestAnimationFrame(frame)}
 function sendHost(obj){if(hostConn?.open)try{hostConn.send(obj)}catch(e){}}
 function sendToId(id,obj){let c=guestConns.get(id);if(c?.open)try{c.send(obj)}catch(e){}}
 function broadcast(obj){for(let c of guestConns.values())if(c.open)try{c.send(obj)}catch(e){}}
-function statePacket(){return{t:'state',running,round,roundGap,waveSpawned,waveTotal,
+function statePacket(){return{t:'state',running,round,roundGap,waveSpawned,waveTotal,dogRoundActive:activeDogRound,
  powerUps:{...powerUps},lightningFlash,
  drops:drops.map(d=>({id:d.id,x:d.x,y:d.y,kind:d.kind,ttl:d.ttl})),
 zombies:zombies.map(z=>({id:z.id,x:z.x,y:z.y,health:z.health,maxHealth:z.maxHealth,variant:z.variant,anim:z.anim,
@@ -428,7 +487,7 @@ quote:z.quote,quoteLeft:z.quoteLeft||0,quoteSerial:z.quoteSerial||0})),
 people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,points:p.points,kills:p.kills,gun:p.gun,slot:p.slot}))}}
 function broadcastState(){broadcast(statePacket())}
 function applySnapshot(s){if(!s||s.t!=='state'||!Array.isArray(s.people)||!Array.isArray(s.zombies))return;
-const previousRound=round;round=s.round;waveSpawned=s.waveSpawned;waveTotal=s.waveTotal;roundGap=s.roundGap;
+const previousRound=round;round=s.round;activeDogRound=!!s.dogRoundActive;waveSpawned=s.waveSpawned;waveTotal=s.waveTotal;roundGap=s.roundGap;
  powerUps={doublePoints:Math.max(0,s.powerUps?.doublePoints||0),instaKill:Math.max(0,s.powerUps?.instaKill||0)};
  lightningFlash=Math.max(lightningFlash,s.lightningFlash||0);
  drops=Array.isArray(s.drops)?s.drops.filter(d=>DROP_META[d.kind]):[];

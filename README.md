@@ -65,7 +65,11 @@ A unique VIP boss joins the tenth round alongside normal zombies. His custom tra
 
 ## Special rounds and power-ups
 
-- **Round 5 and subsequent multiples of five, except round 10:** Hellhound-only rounds (5, 15, 20, 25, …) use the photo-based dog sprite `hellhound.webp`. They feature faster enemies, a darker map, drifting blue-grey mist, lightning at spawn locations and short flashes when dogs appear. The last dog of a completed dog round drops **Max Ammo**.
+- **Unpredictable Hellhound rounds:** Round 5 is guaranteed. Each subsequent dog round happens randomly 5, 6, or 7 rounds after the previous one, without overlapping the VIP on round 10. The host selects the timing and syncs the current dog-wave status to guests. The hellhounds use `hellhound.webp`. They feature faster enemies, a darker map, drifting blue-grey mist, lightning at spawn locations and short flashes when dogs appear. The last dog of a completed dog round drops **Max Ammo**.
 - **Round 10:** VIP boss spawns alongside the normal zombies, with his existing health bar, eye lasers and catchphrases.
 - **Random glowing drops** may appear where an enemy dies. Walk into a drop to pick it up; drops expire after 19 seconds. **Max Ammo** refills magazines and reserve ammo for the team. **Double Points** doubles zombie-hit/kill points for 30 seconds. **Insta-Kill** kills regular zombies and hellhounds with a hit for 22 seconds (but not VIP). **Nuke** clears regular zombies and dogs currently on the map (VIP is immune) and gives each player 400 points. Effects, drops, pickups and dog spawns are host-authoritative and synchronised over PeerJS for every player.
 
+
+## Updated bunker graphics
+
+The canvas now includes perspective-accurate tiled concrete floor detail, weathered wall textures, flickering emergency wall lights, a subtle flashlight-like vignette, muzzle flash illumination, and drifting dust. These are local rendering effects; multiplayer bandwidth is unchanged. The 960×540 base resolution is unchanged to protect performance.
