@@ -15,8 +15,9 @@ All players should keep the page open; the **host must stay connected** or the s
 ## Controls
 
 - **W / A / S / D:** Move
-- **Mouse:** Look / aim
+- **Mouse:** Look left, right, up and down
 - **Left click:** Shoot
+- **Arrow keys:** Look around (including up and down)
 - **R:** Reload
 - **E:** Buy weapons/perks, use the mystery box, or revive a downed teammate nearby
 - **Shift:** Sprint
@@ -57,7 +58,7 @@ To view it locally, serve the folder from a local HTTP server (for example `pyth
 
 
 ### Zombie image visibility
-The custom wide zombie texture is embedded inside `game.js` for reliability on GitHub Pages. `assets/zombie_wide.png` is also included as an editable standalone asset. The lobby displays a thumbnail and the first zombie of each round enters the main hallway in front of the starting position; later zombies appear elsewhere around the map. Re-upload **both** `game.js` and `index.html` when updating an existing deployment, and force-refresh the page to clear cached scripts.
+The custom wide zombie texture is embedded inside `game.js` for reliability on GitHub Pages. `assets/zombie_wide.png` is also included as an editable standalone asset. The first zombie of each round enters the main hallway in front of the starting position; later zombies appear elsewhere around the map. Re-upload **both** `game.js` and `index.html` when updating an existing deployment, and force-refresh the page to clear cached scripts.
 
 ## Round 10: VIP boss
 
@@ -77,3 +78,7 @@ The canvas now includes perspective-accurate tiled concrete floor detail, weathe
 ## Pack-a-Punch machine
 
 The neon-purple Pack-a-Punch machine is in the eastern bunker corridor at **(16.5, 5.5)**. Approach it and press **E** to upgrade the currently held gun for **5,000 points**. The upgrade grants **2.25× damage**, a **50% larger magazine and reserve**, faster firing, full ammo, new weapon names, and purple energy accents and muzzle flashes. You can only upgrade each equipped gun once; changing to a different weapon removes the upgrade (this game carries one gun at a time). Pack-a-Punched ammunition scales properly for reloading and Max Ammo power-ups. In online co-op, the host validates each player's distance, points, and current upgrade before completing the purchase and synchronises the result to guests.
+
+## Vertical mouse look
+
+Looking up and down now changes the camera pitch with mouse movement, touch drag, or the up/down arrow keys. The raycast horizon, enemy sprites, machines, and power-up positions track the camera direction, and vertical aim is checked for shots. Co-op guests send pitch with shots for host validation. The camera has a bounded vertical range, retaining the game's lightweight 2.5D renderer. The menu's custom zombie preview card has been removed; `zombie_wide.png` is still used in the game.
