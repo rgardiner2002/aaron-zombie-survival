@@ -18,6 +18,8 @@ All players should keep the page open; the **host must stay connected** or the s
 - **Mouse:** Look left, right, up and down
 - **Left click:** Shoot
 - **Arrow keys:** Look around (including up and down)
+- **1 / 2:** Equip first or second gun slot
+- **Q:** Swap between your two carried guns
 - **R:** Reload
 - **E:** Buy weapons/perks, use the mystery box, or revive a downed teammate nearby
 - **Shift:** Sprint
@@ -43,7 +45,9 @@ GitHub Pages is **static hosting**, not a multiplayer server. This game uses [Pe
 ```
 index.html               # Game page and UI
 game.js                  # Game, networking, and co-op logic
-assets/zombie_wide.png   # Wider zombie image texture
+zombie_wide.png          # Custom wider zombie image texture
+hellhound.webp           # Custom dog-round sprite
+vip_boss.webp            # VIP boss sprite
 .nojekyll                # Disable GitHub Pages' Jekyll processing
 README.md                # This guide
 ```
@@ -58,7 +62,7 @@ To view it locally, serve the folder from a local HTTP server (for example `pyth
 
 
 ### Zombie image visibility
-The custom wide zombie texture is embedded inside `game.js` for reliability on GitHub Pages. `assets/zombie_wide.png` is also included as an editable standalone asset. The first zombie of each round enters the main hallway in front of the starting position; later zombies appear elsewhere around the map. Re-upload **both** `game.js` and `index.html` when updating an existing deployment, and force-refresh the page to clear cached scripts.
+The zombie sprite loads from `zombie_wide.png` at the repository root. Update that image and refresh the deployment to change its appearance. The first zombie of each round enters the main hallway in front of the starting position; later zombies appear elsewhere around the map. Re-upload **both** `game.js` and `index.html` when updating an existing deployment, and force-refresh the page to clear cached scripts.
 
 ## Round 10: VIP boss
 
@@ -77,8 +81,22 @@ The canvas now includes perspective-accurate tiled concrete floor detail, weathe
 
 ## Pack-a-Punch machine
 
-The neon-purple Pack-a-Punch machine is in the eastern bunker corridor at **(16.5, 5.5)**. Approach it and press **E** to upgrade the currently held gun for **5,000 points**. The upgrade grants **2.25× damage**, a **50% larger magazine and reserve**, faster firing, full ammo, new weapon names, and purple energy accents and muzzle flashes. You can only upgrade each equipped gun once; changing to a different weapon removes the upgrade (this game carries one gun at a time). Pack-a-Punched ammunition scales properly for reloading and Max Ammo power-ups. In online co-op, the host validates each player's distance, points, and current upgrade before completing the purchase and synchronises the result to guests.
+The neon-purple Pack-a-Punch machine is in the eastern bunker corridor at **(16.5, 5.5)**. Approach it and press **E** to upgrade the currently held gun for **5,000 points**. The upgrade grants **2.25× damage**, a **50% larger magazine and reserve**, faster firing, full ammo, new weapon names, and purple energy accents and muzzle flashes. You can upgrade each equipped gun once; each of the two weapon slots retains its own upgrade even when you switch between them. Replacing a weapon removes the upgrade only from that replaced slot. Pack-a-Punched ammunition scales properly for reloading and Max Ammo power-ups. In online co-op, the host validates each player's distance, points, and current upgrade before completing the purchase and synchronises the result to guests.
 
 ## Vertical mouse look
 
 Looking up and down now changes the camera pitch with mouse movement, touch drag, or the up/down arrow keys. The raycast horizon, enemy sprites, machines, and power-up positions track the camera direction, and vertical aim is checked for shots. Co-op guests send pitch with shots for host validation. The camera has a bounded vertical range, retaining the game's lightweight 2.5D renderer. The menu's custom zombie preview card has been removed; `zombie_wide.png` is still used in the game.
+
+## Backrooms map and live leaderboard
+
+This update turns the level into a connected 30 × 24 cell Backrooms-inspired maze, with winding yellow-wallpaper corridors, faded tan carpeting, and flickering overhead fluorescent lights. The yellow and muted-brown palette also extends to the menu and controls. Existing enemies, VIP, Pack-a-Punch and hellhounds remain playable.
+
+A **live leaderboard** underneath the game ranks players in the current four-player room by *total points earned* (so buying weapons will not lower the ranking), then kills. It displays downed status and highlights your own name. As this is a static GitHub Pages game without a database, the leaderboard is **room-local**, not a permanent global high-score service.
+
+## Two-weapon inventory
+
+Each player starts with the M1911 and an empty second weapon slot. Buying or winning a new weapon from the mystery box fills the empty slot; once both slots are full, acquiring another weapon replaces the currently held slot. Use **1** or **2** to equip the selected slot, or **Q** to switch between occupied slots. Each weapon retains its own ammunition and Pack-a-Punch upgrade. Max Ammo refills both carried weapons for every player. Weapon switches are sent to the host so damage and upgrade effects remain correct in online co-op.
+
+## Single Nuke drop
+
+Only one Nuke can exist as an uncollected power-up at once across the shared room. If another random Nuke roll occurs while one is present, the game chooses a different power-up instead. Once the original is collected or expires, a new Nuke can spawn.
