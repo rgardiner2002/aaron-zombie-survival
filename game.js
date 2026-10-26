@@ -7,26 +7,15 @@ const MAX_PITCH=.54;
 // Camera pitch changes the raycasting horizon, while the crosshair remains screen-centred.
 const pitchShift=value=>H*.8*Math.tan(clamp(value||0,-MAX_PITCH,MAX_PITCH));
 const cameraHorizon=()=>HF+pitchShift(player?.pitch||0)+Math.sin(aimBobbing)*2.3;
-const map=[
-'####################',
-'#......#...........#',
-'#......#...........#',
-'#..................#',
-'#..##........##....#',
-'#.........#........#',
-'#.........#........#',
-'#..................#',
-'###.....####.......#',
-'#..................#',
-'#......#...........#',
-'#......#...........#',
-'#..................#',
-'#...##.......##....#',
-'#..................#',
-'#..........#.......#',
-'#..................#',
-'#..................#',
-'####################'];
+const map=(()=>{
+ const w=30,h=24,a=Array.from({length:h},(_,y)=>Array.from({length:w},(_,x)=>x===0||y===0||x===w-1||y===h-1?'#':'.'));
+ for(const [x,d] of [[7,[3,4,9,10,15,16,20,21]],[14,[2,3,7,8,13,14,20,21]],[21,[5,6,11,12,17,18]],[26,[3,4,9,10,15,16,21,22]]])
+  for(let y=1;y<h-1;y++)if(!d.includes(y))a[y][x]='#';
+ for(const [y,d] of [[6,[3,4,11,12,18,19,25,26]],[12,[5,6,10,11,15,16,17,23,24]],[18,[2,3,9,10,16,17,23,24]]])
+  for(let x=1;x<w-1;x++)if(!d.includes(x))a[y][x]='#';
+ for(const [x,y] of [[3,3],[18,9],[23,20],[24,4],[11,15]])a[y][x]='#';
+ return a.map(row=>row.join(''));
+})();
 const MW=map[0].length,MH=map.length;
 const stations=[{x:5.4,y:9.5,type:'smg',label:'MP-40',price:1000},{x:15.3,y:12.5,type:'shotgun',label:'TRENCH GUN',price:1500},{x:11.7,y:6.5,type:'box',label:'MYSTERY BOX',price:950},{x:3.5,y:15.5,type:'perk',label:'FORTIFIED PERK',price:2500},{x:16.5,y:5.5,type:'pack',label:'PACK-A-PUNCH',price:5000}];
 const guns={pistol:{name:'M1911',size:12,reserve:96,damage:42,rate:.29,reload:1.35,spread:.017,pellets:1},smg:{name:'MP-40',size:32,reserve:192,damage:32,rate:.11,reload:1.85,spread:.042,pellets:1},shotgun:{name:'TRENCH GUN',size:8,reserve:56,damage:24,rate:.78,reload:2.15,spread:.18,pellets:7},rifle:{name:'COMMANDO',size:35,reserve:210,damage:48,rate:.145,reload:1.75,spread:.019,pellets:1},lmg:{name:'RPK',size:75,reserve:300,damage:37,rate:.095,reload:2.9,spread:.058,pellets:1},ray:{name:'RAY PROTOTYPE',size:20,reserve:120,damage:170,rate:.31,reload:1.8,spread:.014,pellets:1}};
@@ -37,7 +26,7 @@ const magazineSize=(w,up=false)=>Math.round(guns[w].size*(up?1.5:1));
 const reserveSize=(w,up=false)=>Math.round(guns[w].reserve*(up?1.5:1));
 const displayGun=(w,up=false)=>up?(PACKED_NAMES[w]||guns[w].name+' // MK II'):guns[w].name;
 let packed=false;
-let state='menu',player,zombies=[],particles=[],drops=[],points=500,kills=0,round=0,waveTotal=0,waveSpawned=0,waveDelay=0,roundGap=0,roundNotice=0,gun='pistol',ammo=12,reserve=96,shotCooldown=0,reloadTime=0,shotKick=0,flash=0,hurt=0,shake=0,interactNotice='',interactTime=0,aimBobbing=0,held={},last=0,mouseHeld=false,isDragging=false,prevMouse=0,prevMouseY=0,audioEnabled=true,audioCtx=null,flow=[],flowTick=0,elapsed=0,mutedByBrowser=false;
+let state='menu',player,zombies=[],particles=[],drops=[],points=500,score=0,kills=0,round=0,waveTotal=0,waveSpawned=0,waveDelay=0,roundGap=0,roundNotice=0,gun='pistol',ammo=12,reserve=96,shotCooldown=0,reloadTime=0,shotKick=0,flash=0,hurt=0,shake=0,interactNotice='',interactTime=0,aimBobbing=0,held={},last=0,mouseHeld=false,isDragging=false,prevMouse=0,prevMouseY=0,audioEnabled=true,audioCtx=null,flow=[],flowTick=0,elapsed=0,mutedByBrowser=false;
 // Host-controlled wave types and timed power-ups (synced to co-op clients).
 // The host owns the hidden schedule; clients render the current wave from snapshots.
 let nextDogRound=5,activeDogRound=false;
@@ -76,12 +65,31 @@ const $=(id)=>document.getElementById(id);
 const lobby=$('da-lobby'),topLobby=$('da-room-bar'),roomText=$('da-room-text'),lobbyMessage=$('da-lobby-message'),roster=$('da-roster');
 const hostButton=$('da-host-room'),joinButton=$('da-join-room'),copyButton=$('da-copy-room'),roomInput=$('da-room-input'),nameInput=$('da-name-input');
 const cleanName=t=>String(t||'SURVIVOR').replace(/[<>\\]/g,'').trim().slice(0,16)||'SURVIVOR';
+const scoreBoard=$('da-scoreboard');let lastBoardRefresh=0;
+function sortedStandings(){
+ const players=isHost()?[myRow(),...remotePlayers.values()]:
+ role==='guest'?[...otherPlayers.values(),...(player?[{id:peer?.id,name:myName,score,kills,points,downed:player.downed,slot:mySlot}]:[])]:[];
+ return players.sort((a,b)=>(b.score||0)-(a.score||0)||(b.kills||0)-(a.kills||0)||(a.slot??0)-(b.slot??0));
+}
+function refreshLeaderboard(){
+ if(!scoreBoard)return;
+ scoreBoard.replaceChildren();const players=sortedStandings();
+ if(!players.length){const el=document.createElement('div');el.className='score-empty';el.textContent='Host or join a room for live rankings.';scoreBoard.appendChild(el);return}
+ for(const [i,p] of players.entries()){
+  const el=document.createElement('div');el.className='score-entry';
+  const own=(isHost()&&p.id==='host')||(role==='guest'&&p.id===peer?.id);
+  if(own)el.classList.add('is-you');
+  [String(i+1).padStart(2,'0'),cleanName(p.name)+(own?' (YOU)':''),Number(p.score||0).toLocaleString(),String(p.kills||0),p.downed?'DOWN':'ACTIVE'].forEach(value=>{
+   const s=document.createElement('span');s.textContent=value;el.appendChild(s);
+  });scoreBoard.appendChild(el);
+ }
+}
 const goodCode=t=>String(t||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
 const normAng=v=>(v%TAU+TAU)%TAU;
 const isHost=()=>role==='host';
 const gameActive=()=>running&&(state==='play'||state==='pause'||state==='ready');
 const allActors=()=>[player,...remotePlayers.values()].filter(Boolean);
-const myRow=()=>({id:'host',name:myName,x:player.x,y:player.y,ang:player.ang,health:player.health,maxHealth:player.maxHealth,perk:player.perk,downed:!!player.downed,points,kills,gun,packed,slot:0});
+const myRow=()=>({id:'host',name:myName,x:player.x,y:player.y,ang:player.ang,health:player.health,maxHealth:player.maxHealth,perk:player.perk,downed:!!player.downed,points,score,kills,gun,packed,slot:0});
 function say(s){lobbyMessage.textContent=s;roomError=s}
 function updateRoster(){let members=[];
  if(role==='host')members=[myRow(),...remotePlayers.values()];
@@ -99,9 +107,9 @@ function play(){if(!running){if(role==='host')startMatch();return}state='play';l
 function menu(kind){if(kind==='dead'){running=false;localPaused=true;state='dead';overlay.classList.remove('off');lobby.hidden=true;overline.textContent='YOUR TEAM HAS FALLEN';title.textContent='GAME OVER';description.textContent='The bunker fell on round '+round+'. Host can start a new run.';go.style.display=role==='host'?'inline-block':'none';go.textContent='PLAY AGAIN';if(document.pointerLockElement===canvas)document.exitPointerLock?.();return}if(kind==='pause')pauseLocal();else showLobby(kind)}
 function soundError(err){say('Connection error: '+(err?.type||err?.message||err));}
 function closeNetwork(){if(peer){try{peer.destroy()}catch(e){}}peer=null;guestConns.clear();remotePlayers.clear();otherPlayers.clear();hostConn=null;role='none';running=false;roomCode='';statusRoom()}
-function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,kills:0,gun:'pistol',packed:false,slot,lastFire:-99}}
-function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;nextDogRound=5;activeDogRound=false;points=500;kills=0;round=0;gun='pistol';packed=false;ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
-function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,kills:0,gun:'pistol',packed:false,stamina:100,lastFire:-99})}
+function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,score:0,kills:0,gun:'pistol',packed:false,slot,lastFire:-99}}
+function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;nextDogRound=5;activeDogRound=false;points=500;score=0;kills=0;round=0;gun='pistol';packed=false;ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
+function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,score:0,kills:0,gun:'pistol',packed:false,stamina:100,lastFire:-99})}
 function newWave(){
  round++;
  const dogWave=round===nextDogRound;
@@ -169,7 +177,12 @@ function updateVip(z,target,dt){
 }
 function spawnDrop(x,y,kind=null,guaranteed=false){
  if(!isHost()||(!guaranteed&&(drops.length>=5||Math.random()>.115)))return;
- const type=kind||DROP_TYPES[Math.floor(Math.random()*DROP_TYPES.length)];
+ let type=kind||DROP_TYPES[Math.floor(Math.random()*DROP_TYPES.length)];
+ if(type==='nuke'&&drops.some(d=>d.kind==='nuke')){
+  if(kind==='nuke')return;
+  const alternatives=DROP_TYPES.filter(t=>t!=='nuke');
+  type=alternatives[Math.floor(Math.random()*alternatives.length)];
+ }
  drops.push({id:++dropSequence,x,y,kind:type,ttl:guaranteed?24:19});
 }
 function awardZombiePoints(id,base){addPoints(id,base*(powerUps.doublePoints>0?2:1))}
@@ -245,29 +258,43 @@ function renderFloorDetail(horizon,ca,sa){
       const fx=player.x+depth*(ca-sa*side),fy=player.y+depth*(sa+ca*side);
       const sx=fx-Math.floor(fx),sy=fy-Math.floor(fy);
       if(sx<.045||sy<.045){
-        ctx.fillStyle='rgba(3,7,6,'+clamp(.22-depth*.008,.07,.2)+')';
+        ctx.fillStyle='rgba(73,58,31,'+clamp(.22-depth*.008,.07,.2)+')';
         ctx.fillRect(px,py,17,2);
       }else if(Math.sin(fx*73.9+fy*46.1)>.91){
-        ctx.fillStyle='rgba(196,209,182,.055)';ctx.fillRect(px,py,7,1);
+        ctx.fillStyle='rgba(241,220,142,.065)';ctx.fillRect(px,py,7,1);
       }
     }
   }
 }
-function wallRender(){const horizon=cameraHorizon();let sky=ctx.createLinearGradient(0,0,0,horizon);sky.addColorStop(0,'#060d10');sky.addColorStop(1,'#1c2728');ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);let floor=ctx.createLinearGradient(0,horizon,0,H);floor.addColorStop(0,'#32342e');floor.addColorStop(.3,'#1b201e');floor.addColorStop(1,'#090e0c');ctx.fillStyle=floor;ctx.fillRect(0,horizon,W,H-horizon);
+function drawFluorescentPanels(){
+ const horizon=cameraHorizon();ctx.save();
+ for(let y=3;y<MH-1;y+=6)for(let x=3;x<MW-1;x+=7){
+  if(map[y][x]!=='.')continue;
+  const p=screenOf(x+.5,y+.5);
+  if(p.depth<=.4||p.depth>16||p.x<-170||p.x>W+170)continue;
+  const w=clamp(240/p.depth,12,160),h=clamp(19/p.depth,2,14),py=horizon-H*.56/p.depth;
+  const flicker=.86+.14*Math.sin(elapsed*2.2+x*7+y*3);
+  ctx.globalAlpha=flicker;ctx.shadowColor='#fff1b8';ctx.shadowBlur=clamp(160/p.depth,10,55);
+  ctx.fillStyle='#fffbe0';ctx.fillRect(p.x-w*.5,py,w,h);
+  ctx.shadowBlur=0;ctx.strokeStyle='#d7c77e';ctx.strokeRect(p.x-w*.5,py,w,h);
+ }
+ ctx.restore();
+}
+function wallRender(){const horizon=cameraHorizon();let sky=ctx.createLinearGradient(0,0,0,horizon);sky.addColorStop(0,'#d4cfaa');sky.addColorStop(1,'#e8dfad');ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);let floor=ctx.createLinearGradient(0,horizon,0,H);floor.addColorStop(0,'#baaa76');floor.addColorStop(.3,'#96865a');floor.addColorStop(1,'#645839');ctx.fillStyle=floor;ctx.fillRect(0,horizon,W,H-horizon);
 let ca=Math.cos(player.ang),sa=Math.sin(player.ang);
-renderFloorDetail(horizon,ca,sa);
+renderFloorDetail(horizon,ca,sa);drawFluorescentPanels();
 ctx.strokeStyle='#c0b6a40a';for(let i=1;i<=18;i++){let y=horizon+(H-horizon)*(1-1/(i*.26+1));ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
 for(let i=0;i<W/SW;i++){let sx=i*SW,cx=2*sx/W-1,rx=ca-sa*cx*TAN,ry=sa+ca*cx*TAN,r=cast(rx,ry);zBuffer[i]=r.d;let height=Math.min(H*4,H/r.d),top=horizon-height/2,bottom=horizon+height/2,lighting=clamp(1-r.d/17,.13,.91)*(r.side?.68:1),grain=(Math.sin(r.u*88+r.mapX*16+r.mapY*23)*.12+.88);
 let lamp=(r.mapX*5+r.mapY*7)%11===0&&r.u>.29&&r.u<.71;
-let flicker=.92+.08*Math.sin(elapsed*7.2+r.mapX*3),base=lamp?[132,128,104]:[92,108,103];
+let flicker=.9+.1*Math.sin(elapsed*7.2+r.mapX*3),base=lamp?[246,236,176]:[214,197,113];
 let mortar=(r.u<.017||r.u>.983),varied=Math.sin(r.mapX*17.3+r.mapY*31.2+r.u*52)*.07+.94;
 let c=base.map(v=>Math.round(v*lighting*grain*varied*(mortar?.45:1)*(lamp?1.5*flicker:1)));ctx.fillStyle='rgb('+c.join(',')+')';ctx.fillRect(sx,Math.max(0,top),SW+1,Math.min(H,bottom)-Math.max(0,top));
 if(lamp&&height>28){
 const panelY=Math.max(0,top+height*.09),panelH=Math.min(H-panelY,Math.max(2,height*.048));
-ctx.fillStyle='rgba(255,192,95,'+(clamp(.35/r.d,.07,.29)*flicker)+')';
+ctx.fillStyle='rgba(255,255,219,'+(clamp(.5/r.d,.1,.33)*flicker)+')';
 ctx.fillRect(sx,panelY,SW+1,panelH);
 }
-if(height>34){ctx.fillStyle='rgba(9,14,11,.27)';let lines=Math.min(8,Math.max(2,Math.floor(height/70)));for(let k=1;k<lines;k++){let yy=top+height*k/lines;if(yy>0&&yy<H)ctx.fillRect(sx,yy,SW+1,Math.max(1,height*.006))}let stain=Math.abs(Math.sin(r.mapX*27+r.mapY*17+Math.floor(r.u*7)*3.77));if(stain>.88){ctx.fillStyle='rgba(7,10,8,.25)';ctx.fillRect(sx,Math.max(0,top+height*.16),SW+1,Math.min(height*.43,H))}}
+if(height>34){ctx.fillStyle='rgba(95,75,32,.13)';let lines=Math.min(8,Math.max(2,Math.floor(height/70)));for(let k=1;k<lines;k++){let yy=top+height*k/lines;if(yy>0&&yy<H)ctx.fillRect(sx,yy,SW+1,Math.max(1,height*.006))}let stain=Math.abs(Math.sin(r.mapX*27+r.mapY*17+Math.floor(r.u*7)*3.77));if(stain>.88){ctx.fillStyle='rgba(7,10,8,.25)';ctx.fillRect(sx,Math.max(0,top+height*.16),SW+1,Math.min(height*.43,H))}}
 // Small red safety light spill on selected wall sectors
 if(r.mapX%8===0&&r.mapY%4===0&&r.u>.44&&r.u<.57){ctx.fillStyle='rgba(224,57,30,.2)';ctx.fillRect(sx,Math.max(0,top+height*.14),SW,Math.min(height*.11,H))}
 }
@@ -360,8 +387,8 @@ function drawAtmosphere(){
  const cx=W*.5+Math.sin(aimBobbing*.16)*8,cy=HF+18;
  const shade=ctx.createRadialGradient(cx,cy,36,cx,cy,W*.65);
  shade.addColorStop(0,'rgba(1,6,7,0)');
- shade.addColorStop(.42,'rgba(0,5,8,.10)');
- shade.addColorStop(1,'rgba(0,2,5,.62)');
+ shade.addColorStop(.42,'rgba(74,60,21,.08)');
+ shade.addColorStop(1,'rgba(44,32,9,.42)');
  ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
  if(flash>0){
    const glow=ctx.createRadialGradient(W*.5,H*.66,0,W*.5,H*.66,H*.65);
@@ -455,7 +482,7 @@ function interact(){if(!gameActive()||localPaused)return;let down=nearestDown();
 function stationOf(type){return stations.find(s=>s.type===type)}
 function actorById(id){return id==='host'?player:remotePlayers.get(id)}
 function actorPoints(id){return id==='host'?points:remotePlayers.get(id)?.points||0}
-function addPoints(id,n){if(id==='host')points+=n;else{let p=remotePlayers.get(id);if(p)p.points+=n}}
+function addPoints(id,n){if(id==='host'){points+=n;if(n>0)score+=n;}else{const p=remotePlayers.get(id);if(p){p.points+=n;if(n>0)p.score=(p.score||0)+n;}}}
 function performBuy(id,kind){let p=actorById(id),s=stationOf(kind);
 if(!p||p.downed||!s||dist(s,p)>=1.68)return;
 if(!['box','perk','smg','shotgun','pack'].includes(kind))return;
@@ -527,7 +554,7 @@ function render(){if(!player){ctx.fillStyle='#0a100f';ctx.fillRect(0,0,W,H);retu
  ctx.save();if(shake>0)ctx.translate(rand(-6,6)*shake,rand(-6,6)*shake);
  wallRender();drawWorld();dogWeather();drawAtmosphere();drawDrops();renderParticles();gunDraw();ui();ctx.restore();
  status.textContent=role==='none'?'NOT CONNECTED':'ROOM '+roomCode+' · '+(running?'ROUND '+round+' · '+zombies.length+(isDogRound(round)?' HELLHOUNDS':' ZOMBIES'):'LOBBY')}
-function frame(t){let dt=Math.min((t-last)/1000||0,.05);last=t;update(dt);render();requestAnimationFrame(frame)}
+function frame(t){let dt=Math.min((t-last)/1000||0,.05);last=t;update(dt);render();if(t-lastBoardRefresh>400){lastBoardRefresh=t;refreshLeaderboard()}requestAnimationFrame(frame)}
 function sendHost(obj){if(hostConn?.open)try{hostConn.send(obj)}catch(e){}}
 function sendToId(id,obj){let c=guestConns.get(id);if(c?.open)try{c.send(obj)}catch(e){}}
 function broadcast(obj){for(let c of guestConns.values())if(c.open)try{c.send(obj)}catch(e){}}
@@ -537,14 +564,14 @@ function statePacket(){return{t:'state',running,round,roundGap,waveSpawned,waveT
 zombies:zombies.map(z=>({id:z.id,x:z.x,y:z.y,health:z.health,maxHealth:z.maxHealth,variant:z.variant,anim:z.anim,
 vip:!!z.vip,dog:!!z.dog,arrivalFx:z.arrivalFx||0,laserCharge:z.laserCharge||0,laserFx:z.laserFx||0,laserTargetX:z.laserTargetX,laserTargetY:z.laserTargetY,
 quote:z.quote,quoteLeft:z.quoteLeft||0,quoteSerial:z.quoteSerial||0})),
-people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,packed:!!p.packed,points:p.points,kills:p.kills,gun:p.gun,slot:p.slot}))}}
+people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,packed:!!p.packed,points:p.points,score:p.score||0,kills:p.kills,gun:p.gun,slot:p.slot}))}}
 function broadcastState(){broadcast(statePacket())}
 function applySnapshot(s){if(!s||s.t!=='state'||!Array.isArray(s.people)||!Array.isArray(s.zombies))return;
 const previousRound=round;round=s.round;activeDogRound=!!s.dogRoundActive;waveSpawned=s.waveSpawned;waveTotal=s.waveTotal;roundGap=s.roundGap;
  powerUps={doublePoints:Math.max(0,s.powerUps?.doublePoints||0),instaKill:Math.max(0,s.powerUps?.instaKill||0)};
  lightningFlash=Math.max(lightningFlash,s.lightningFlash||0);
  drops=Array.isArray(s.drops)?s.drops.filter(d=>DROP_META[d.kind]):[];
-const self=s.people.find(p=>p.id===peer?.id);if(self){if(player.health>self.health)hurt=.8;player.health=self.health;player.maxHealth=self.maxHealth;player.downed=self.downed;player.perk=self.perk;packed=!!self.packed;player.packed=packed;points=self.points;kills=self.kills;if(!running||state==='ready'||state==='lobby'){player.x=self.x;player.y=self.y;player.ang=self.ang}}
+const self=s.people.find(p=>p.id===peer?.id);if(self){if(player.health>self.health)hurt=.8;player.health=self.health;player.maxHealth=self.maxHealth;player.downed=self.downed;player.perk=self.perk;packed=!!self.packed;player.packed=packed;points=self.points;score=self.score||0;kills=self.kills;if(!running||state==='ready'||state==='lobby'){player.x=self.x;player.y=self.y;player.ang=self.ang}}
 otherPlayers.clear();for(let p of s.people)if(p.id!==peer?.id)otherPlayers.set(p.id,p);
 const existing=new Map(zombies.map(z=>[z.id,z]));let updated=[];for(let z of s.zombies){let old=existing.get(z.id);if(old){if(z.vip&&old.quoteSerial!==z.quoteSerial&&z.quoteLeft>0)vipVoice(z.quote);
 old.tx=z.x;old.ty=z.y;Object.assign(old,{health:z.health,maxHealth:z.maxHealth,variant:z.variant,vip:z.vip,dog:z.dog,arrivalFx:z.arrivalFx,
