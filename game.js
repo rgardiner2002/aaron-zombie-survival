@@ -26,6 +26,53 @@ const magazineSize=(w,up=false)=>Math.round(guns[w].size*(up?1.5:1));
 const reserveSize=(w,up=false)=>Math.round(guns[w].reserve*(up?1.5:1));
 const displayGun=(w,up=false)=>up?(PACKED_NAMES[w]||guns[w].name+' // MK II'):guns[w].name;
 let packed=false;
+// Two weapon slots, each retaining independent ammo, magazine and Pack-a-Punch status.
+const newLoadout=()=>[{gun:'pistol',ammo:12,reserve:96,packed:false},null];
+let weaponSlots=newLoadout(),activeSlot=0;
+function saveCurrentWeapon(){
+ const item=weaponSlots[activeSlot];
+ if(item)Object.assign(item,{gun,ammo,reserve,packed});
+ if(player){player.slots=weaponSlots;player.activeSlot=activeSlot;player.gun=gun;player.packed=packed;}
+}
+function activateWeaponSlot(index,network=true){
+ if(!Number.isInteger(index)||index<0||index>1||!weaponSlots[index]||index===activeSlot)return false;
+ saveCurrentWeapon();activeSlot=index;
+ const item=weaponSlots[index];gun=item.gun;ammo=item.ammo;reserve=item.reserve;packed=item.packed;
+ reloadTime=0;shotCooldown=.17;mouseHeld=false;saveCurrentWeapon();
+ if(network){if(role==='guest')sendHost({t:'switch',slot:index});else if(role==='host')broadcastState();}
+ return true;
+}
+function grantLocalWeapon(g){
+ saveCurrentWeapon();
+ let index=weaponSlots.findIndex(w=>w===null);
+ if(index<0)index=activeSlot;
+ weaponSlots[index]={gun:g,ammo:magazineSize(g),reserve:reserveSize(g),packed:false};
+ activeSlot=index;gun=g;ammo=magazineSize(g);reserve=reserveSize(g);packed=false;
+ reloadTime=0;shotCooldown=.2;mouseHeld=false;saveCurrentWeapon();
+}
+function refillLocalWeapon(index,bonus){
+ saveCurrentWeapon();const item=weaponSlots[index];
+ if(!item)return;
+ item.reserve+=bonus;
+ if(index===activeSlot)reserve=item.reserve;
+ saveCurrentWeapon();
+}
+function applyArsenalMessage(m){
+ if(!guns[m.gun]||!Number.isInteger(m.slot)||m.slot<0||m.slot>1)return;
+ saveCurrentWeapon();
+ if(m.refill){
+  const item=weaponSlots[m.slot];
+  if(item?.gun!==m.gun)return;
+  item.reserve+=Math.max(0,Number(m.bonus)||0);
+  if(m.slot===activeSlot)reserve=item.reserve;
+ }else{
+  weaponSlots[m.slot]={gun:m.gun,ammo:magazineSize(m.gun),reserve:reserveSize(m.gun),packed:false};
+  activeSlot=m.slot;
+  const item=weaponSlots[m.slot];gun=item.gun;ammo=item.ammo;reserve=item.reserve;packed=false;
+  reloadTime=0;shotCooldown=.2;mouseHeld=false;
+ }
+ saveCurrentWeapon();notice(m.notice||'WEAPON READY',2.4);
+}
 let state='menu',player,zombies=[],particles=[],drops=[],points=500,score=0,kills=0,round=0,waveTotal=0,waveSpawned=0,waveDelay=0,roundGap=0,roundNotice=0,gun='pistol',ammo=12,reserve=96,shotCooldown=0,reloadTime=0,shotKick=0,flash=0,hurt=0,shake=0,interactNotice='',interactTime=0,aimBobbing=0,held={},last=0,mouseHeld=false,isDragging=false,prevMouse=0,prevMouseY=0,audioEnabled=true,audioCtx=null,flow=[],flowTick=0,elapsed=0,mutedByBrowser=false;
 // Host-controlled wave types and timed power-ups (synced to co-op clients).
 // The host owns the hidden schedule; clients render the current wave from snapshots.
@@ -89,7 +136,7 @@ const normAng=v=>(v%TAU+TAU)%TAU;
 const isHost=()=>role==='host';
 const gameActive=()=>running&&(state==='play'||state==='pause'||state==='ready');
 const allActors=()=>[player,...remotePlayers.values()].filter(Boolean);
-const myRow=()=>({id:'host',name:myName,x:player.x,y:player.y,ang:player.ang,health:player.health,maxHealth:player.maxHealth,perk:player.perk,downed:!!player.downed,points,score,kills,gun,packed,slot:0});
+const myRow=()=>({id:'host',name:myName,x:player.x,y:player.y,ang:player.ang,health:player.health,maxHealth:player.maxHealth,perk:player.perk,downed:!!player.downed,points,score,kills,gun,packed,activeSlot,slot:0});
 function say(s){lobbyMessage.textContent=s;roomError=s}
 function updateRoster(){let members=[];
  if(role==='host')members=[myRow(),...remotePlayers.values()];
@@ -107,9 +154,9 @@ function play(){if(!running){if(role==='host')startMatch();return}state='play';l
 function menu(kind){if(kind==='dead'){running=false;localPaused=true;state='dead';overlay.classList.remove('off');lobby.hidden=true;overline.textContent='YOUR TEAM HAS FALLEN';title.textContent='GAME OVER';description.textContent='The bunker fell on round '+round+'. Host can start a new run.';go.style.display=role==='host'?'inline-block':'none';go.textContent='PLAY AGAIN';if(document.pointerLockElement===canvas)document.exitPointerLock?.();return}if(kind==='pause')pauseLocal();else showLobby(kind)}
 function soundError(err){say('Connection error: '+(err?.type||err?.message||err));}
 function closeNetwork(){if(peer){try{peer.destroy()}catch(e){}}peer=null;guestConns.clear();remotePlayers.clear();otherPlayers.clear();hostConn=null;role='none';running=false;roomCode='';statusRoom()}
-function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,score:0,kills:0,gun:'pistol',packed:false,slot,lastFire:-99}}
-function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;nextDogRound=5;activeDogRound=false;points=500;score=0;kills=0;round=0;gun='pistol';packed=false;ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
-function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,score:0,kills:0,gun:'pistol',packed:false,stamina:100,lastFire:-99})}
+function newActor(slot,name,id){let [x,y]=spawnSpots[slot]||spawnSpots[0];return{id,name,x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,stamina:100,regen:0,downed:false,points:500,score:0,kills:0,gun:'pistol',packed:false,slots:newLoadout(),activeSlot:0,slot,lastFire:-99}}
+function reset(){let id=role==='host'?'host':peer?.id||'guest';let v=newActor(mySlot,myName,id);player={...v};zombies=[];particles=[];drops=[];otherPlayers.clear();powerUps={doublePoints:0,instaKill:0};lightningFlash=0;dropSequence=0;nextDogRound=5;activeDogRound=false;points=500;score=0;kills=0;round=0;gun='pistol';packed=false;weaponSlots=newLoadout();activeSlot=0;player.slots=weaponSlots;player.activeSlot=0;ammo=12;reserve=96;shotCooldown=0;reloadTime=0;shotKick=0;flash=0;hurt=0;shake=0;elapsed=0;waveDelay=0;roundGap=0;interactTime=0;roundNotice=0;flowTick=0}
+function resetActor(v){let [x,y]=spawnSpots[v.slot]||spawnSpots[0];Object.assign(v,{x,y,ang:.16,pitch:0,health:100,maxHealth:100,perk:false,downed:false,regen:0,points:500,score:0,kills:0,gun:'pistol',packed:false,slots:newLoadout(),activeSlot:0,stamina:100,lastFire:-99})}
 function newWave(){
  round++;
  const dogWave=round===nextDogRound;
@@ -191,8 +238,12 @@ function collectDrop(drop,actor){
  const type=drop.kind;
  if(type==='maxammo'){
    ammo=magazineSize(gun,packed);reserve=reserveSize(gun,packed);reloadTime=0;
+   saveCurrentWeapon();
+   for(const item of weaponSlots)if(item){item.ammo=magazineSize(item.gun,item.packed);item.reserve=reserveSize(item.gun,item.packed)}
+   ammo=weaponSlots[activeSlot].ammo;reserve=weaponSlots[activeSlot].reserve;saveCurrentWeapon();
    for(const p of remotePlayers.values()){
-     sendToId(p.id,{t:'maxammo',gun:p.gun});
+    for(const item of p.slots||[])if(item){item.ammo=magazineSize(item.gun,item.packed);item.reserve=reserveSize(item.gun,item.packed)}
+    sendToId(p.id,{t:'maxammo'});
    }
  }else if(type==='doublepoints')powerUps.doublePoints=30;
  else if(type==='instakill')powerUps.instaKill=22;
@@ -461,7 +512,15 @@ ctx.fillStyle='#090f0dc6';ctx.fillRect(W-217,17,199,65);text('SCORE',W-197,33,11
 ctx.fillStyle='#080d0bce';ctx.fillRect(19,H-91,224,70);text(player.perk?'FORTIFIED +':'HEALTH',30,H-77,12,player.perk?'#f3b69a':'#c8d7b9','left','monospace');ctx.fillStyle='#313632';ctx.fillRect(30,H-63,199,11);ctx.fillStyle=player.health<30?'#ea4739':'#9db88f';ctx.fillRect(30,H-63,199*player.health/player.maxHealth,11);text(Math.ceil(player.health)+' / '+player.maxHealth,227,H-76,12,'#eee9db','right','monospace');ctx.fillStyle='#2b302b';ctx.fillRect(30,H-40,199,4);ctx.fillStyle='#dab374';ctx.fillRect(30,H-40,199*player.stamina/100,4);
 // team status
 {let people=isHost()?[myRow(),...remotePlayers.values()]:Array.from(otherPlayers.values());if(role==='guest')people.push({...player,id:peer?.id,name:myName,slot:mySlot});people.sort((a,b)=>a.slot-b.slot);let posx=265;for(let p of people){ctx.fillStyle='#060b0ad9';ctx.fillRect(posx,H-37,93,19);text((p.downed?'✚ ':'')+p.name.slice(0,8),posx+4,H-27,10,p.downed?'#ff8c86':'#badbd2','left','monospace');posx+=97}}
-// ammo
+// Two-slot arsenal, with the equipped slot outlined in pale yellow.
+for(let slot=0;slot<2;slot++){
+ const item=weaponSlots[slot];
+ const x=W-245+slot*116,y=H-130;
+ ctx.fillStyle=slot===activeSlot?'#645522e0':'#2f291bc9';ctx.fillRect(x,y,110,23);
+ ctx.strokeStyle=slot===activeSlot?'#f4df91':'#7a714d';ctx.lineWidth=1;ctx.strokeRect(x,y,110,23);
+ text((slot+1)+' '+(item?guns[item.gun].name:'EMPTY').slice(0,12),x+6,y+12,10,slot===activeSlot?'#fff0ae':'#c5bc95','left','monospace');
+}
+ // ammo
 ctx.fillStyle='#070d0bdb';ctx.fillRect(W-245,H-105,226,84);text(displayGun(gun,packed),W-229,H-87,packed?11:13,packed?'#ebb1ff':'#b9c9b9','left','monospace');text(String(ammo),W-229,H-49,39,ammo<=Math.ceil(magazineSize(gun,packed)*.25)?'#fa856a':'#f9f3dd');text('/ '+reserve,W-122,H-43,24,'#a5ada7');if(reloadTime>0)text('RELOADING…',W-229,H-20,12,'#f0bb83','left','monospace');else if(ammo===0)text('PRESS R TO RELOAD',W-229,H-20,12,'#f0bb83','left','monospace');
 if(player.downed){ctx.fillStyle='#130000a8';ctx.fillRect(0,0,W,H);text('YOU ARE DOWN',W/2,H/2-50,38,'#fa6960','center');text('A TEAMMATE MUST REVIVE YOU',W/2,H/2,17,'#fff5ea','center','monospace')}
 if(roundNotice>0){ctx.globalAlpha=clamp(roundNotice/1.1,0,1);text('ROUND '+round,mid,145,36,'#eaa37b','center');text(isDogRound(round)?'HELLHOUNDS IN THE MIST':'SURVIVE THE HORDE',mid,179,12,'#e2dad0','center','monospace');ctx.globalAlpha=1}
@@ -495,25 +554,47 @@ if(kind==='pack'){
  addPoints(id,-PACK_COST);
  if(id==='host'){
   packed=true;player.packed=true;ammo=magazineSize(currentGun,true);
-  reserve=reserveSize(currentGun,true);reloadTime=0;shotCooldown=.3;
+  reserve=reserveSize(currentGun,true);reloadTime=0;shotCooldown=.3;saveCurrentWeapon();
   notice('PACK-A-PUNCHED: '+displayGun(currentGun,true),4);
  }else{
-  p.packed=true;
+  p.packed=true;if(p.slots?.[p.activeSlot]){p.slots[p.activeSlot].packed=true;p.slots[p.activeSlot].ammo=magazineSize(currentGun,true);p.slots[p.activeSlot].reserve=reserveSize(currentGun,true);}
   sendToId(id,{t:'pack',gun:currentGun,ammo:magazineSize(currentGun,true),reserve:reserveSize(currentGun,true),
    notice:'PACK-A-PUNCHED: '+displayGun(currentGun,true)});
  }
  sound(190,.34,'sawtooth',.14,470);sound(550,.48,'triangle',.11,-170);
  broadcastState();return;
 }
-let activeGun=id==='host'?gun:p.gun,price=activeGun===kind&&(kind==='smg'||kind==='shotgun')?450:s.price;
+const owned=id==='host'?weaponSlots:p.slots;
+ const hasGun=owned?.some(item=>item?.gun===kind);
+ let price=hasGun&&(kind==='smg'||kind==='shotgun')?450:s.price;
 if(kind==='perk'&&p.perk){if(id==='host')notice('FORTIFIED ALREADY ACTIVE');return}
 if(actorPoints(id)<price){if(id==='host')notice('NOT ENOUGH POINTS — NEED '+price);else sendToId(id,{t:'notice',message:'NOT ENOUGH POINTS — NEED '+price});return}
 addPoints(id,-price);if(kind==='perk'){p.perk=true;p.maxHealth=180;p.health=180;if(id==='host')notice('FORTIFIED — MAX HEALTH INCREASED')}
-else{let selection=kind==='box'?['smg','shotgun','rifle','lmg','ray'][Math.floor(Math.random()*5)]:kind;if(id==='host'){if(selection===gun&&kind!=='box')reserve+=reserveSize(gun,packed);else equip(selection);notice('ACQUIRED: '+guns[selection].name)}else{const refill=(selection===p.gun&&kind!=='box');if(!refill)p.packed=false;p.gun=selection;
-sendToId(id,{t:refill?'refill':'purchase',gun:selection,ammo:magazineSize(selection,refill&&p.packed),
-reserve:reserveSize(selection,refill&&p.packed),notice:refill?'AMMUNITION RESTOCKED':'ACQUIRED: '+guns[selection].name})}}
+else{
+ const selection=kind==='box'?['smg','shotgun','rifle','lmg','ray'][Math.floor(Math.random()*5)]:kind;
+ if(id==='host'){
+  const ownedIndex=weaponSlots.findIndex(item=>item?.gun===selection);
+  if(ownedIndex>=0){const item=weaponSlots[ownedIndex];refillLocalWeapon(ownedIndex,reserveSize(selection,item.packed));notice('AMMUNITION RESTOCKED: '+guns[selection].name)}
+  else{grantLocalWeapon(selection);notice('ACQUIRED: '+guns[selection].name)}
+ }else{
+  if(!Array.isArray(p.slots))p.slots=newLoadout();
+  const ownedIndex=p.slots.findIndex(item=>item?.gun===selection);
+  if(ownedIndex>=0){
+   const item=p.slots[ownedIndex],bonus=reserveSize(selection,item.packed);
+   item.reserve+=bonus;
+   sendToId(id,{t:'arsenal',slot:ownedIndex,gun:selection,refill:true,bonus,notice:'AMMUNITION RESTOCKED'});
+  }else{
+   let index=p.slots.findIndex(item=>item===null);
+   if(index<0)index=p.activeSlot||0;
+   p.slots[index]={gun:selection,ammo:magazineSize(selection),reserve:reserveSize(selection),packed:false};
+   p.activeSlot=index;p.gun=selection;p.packed=false;
+   sendToId(id,{t:'arsenal',slot:index,gun:selection,refill:false,notice:'ACQUIRED: '+guns[selection].name});
+  }
+ }
+}
 if(id==='host')sound(420,.12,'triangle',.08,280)}
-function equip(g){gun=g;packed=false;if(player)player.packed=false;ammo=magazineSize(g);reserve=reserveSize(g);reloadTime=0;shotCooldown=.2}
+function equip(g){grantLocalWeapon(g)}
+function swapWeapon(){activateWeaponSlot(activeSlot===0?1:0)}
 function reload(){if(!gameActive()||localPaused||player.downed||reloadTime>0||ammo===magazineSize(gun,packed)||reserve<=0)return;reloadTime=guns[gun].reload;mouseHeld=false;sound(520,.075,'triangle',.065,-270)}
 function spawnBlood(x,y,head){for(let i=0;i<(head?18:9);i++)particles.push({x,y,vx:rand(-140,140),vy:rand(-140,60),gravity:rand(140,260),life:rand(.18,.6),size:rand(2,7),head})}
 function unobstructed(a,b){let d=dist(a,b),steps=Math.ceil(d/.11);for(let i=1;i<steps;i++){let f=i/steps;if(solid(a.x+(b.x-a.x)*f,a.y+(b.y-a.y)*f))return false}return true}
@@ -564,14 +645,14 @@ function statePacket(){return{t:'state',running,round,roundGap,waveSpawned,waveT
 zombies:zombies.map(z=>({id:z.id,x:z.x,y:z.y,health:z.health,maxHealth:z.maxHealth,variant:z.variant,anim:z.anim,
 vip:!!z.vip,dog:!!z.dog,arrivalFx:z.arrivalFx||0,laserCharge:z.laserCharge||0,laserFx:z.laserFx||0,laserTargetX:z.laserTargetX,laserTargetY:z.laserTargetY,
 quote:z.quote,quoteLeft:z.quoteLeft||0,quoteSerial:z.quoteSerial||0})),
-people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,packed:!!p.packed,points:p.points,score:p.score||0,kills:p.kills,gun:p.gun,slot:p.slot}))}}
+people:[myRow(),...remotePlayers.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,ang:p.ang,health:p.health,maxHealth:p.maxHealth,downed:p.downed,perk:p.perk,packed:!!p.packed,points:p.points,score:p.score||0,kills:p.kills,gun:p.gun,activeSlot:p.activeSlot||0,slot:p.slot}))}}
 function broadcastState(){broadcast(statePacket())}
 function applySnapshot(s){if(!s||s.t!=='state'||!Array.isArray(s.people)||!Array.isArray(s.zombies))return;
 const previousRound=round;round=s.round;activeDogRound=!!s.dogRoundActive;waveSpawned=s.waveSpawned;waveTotal=s.waveTotal;roundGap=s.roundGap;
  powerUps={doublePoints:Math.max(0,s.powerUps?.doublePoints||0),instaKill:Math.max(0,s.powerUps?.instaKill||0)};
  lightningFlash=Math.max(lightningFlash,s.lightningFlash||0);
  drops=Array.isArray(s.drops)?s.drops.filter(d=>DROP_META[d.kind]):[];
-const self=s.people.find(p=>p.id===peer?.id);if(self){if(player.health>self.health)hurt=.8;player.health=self.health;player.maxHealth=self.maxHealth;player.downed=self.downed;player.perk=self.perk;packed=!!self.packed;player.packed=packed;points=self.points;score=self.score||0;kills=self.kills;if(!running||state==='ready'||state==='lobby'){player.x=self.x;player.y=self.y;player.ang=self.ang}}
+const self=s.people.find(p=>p.id===peer?.id);if(self){if(player.health>self.health)hurt=.8;player.health=self.health;player.maxHealth=self.maxHealth;player.downed=self.downed;player.perk=self.perk;if(self.activeSlot===activeSlot){packed=!!self.packed;player.packed=packed;}points=self.points;score=self.score||0;kills=self.kills;if(!running||state==='ready'||state==='lobby'){player.x=self.x;player.y=self.y;player.ang=self.ang}}
 otherPlayers.clear();for(let p of s.people)if(p.id!==peer?.id)otherPlayers.set(p.id,p);
 const existing=new Map(zombies.map(z=>[z.id,z]));let updated=[];for(let z of s.zombies){let old=existing.get(z.id);if(old){if(z.vip&&old.quoteSerial!==z.quoteSerial&&z.quoteLeft>0)vipVoice(z.quote);
 old.tx=z.x;old.ty=z.y;Object.assign(old,{health:z.health,maxHealth:z.maxHealth,variant:z.variant,vip:z.vip,dog:z.dog,arrivalFx:z.arrivalFx,
@@ -591,6 +672,10 @@ function guestMessage(conn,m){if(!m||typeof m!=='object')return;
 if(m.t==='join'){hostAddGuest(conn,m);return}let p=remotePlayers.get(conn.peer);if(!p||!running)return;
 if(m.t==='pose'&&typeof m.x==='number'&&typeof m.y==='number'&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Math.abs(m.x-p.x)<4&&Math.abs(m.y-p.y)<4){let x=clamp(m.x,.3,MW-.3),y=clamp(m.y,.3,MH-.3);if(!p.downed&&canStand(x,y,.23)){p.x=x;p.y=y}if(Number.isFinite(m.ang))p.ang=normAng(m.ang)}
 else if(m.t==='shot'&&typeof m.angle==='number'&&Number.isFinite(m.angle)&&m.gun===p.gun){resolveShot(p,conn.peer,p.gun,normAng(m.angle),Number.isFinite(m.pitch)?clamp(m.pitch,-MAX_PITCH,MAX_PITCH):0)}
+else if(m.t==='switch'&&Number.isInteger(m.slot)&&m.slot>=0&&m.slot<=1&&p.slots?.[m.slot]){
+ p.activeSlot=m.slot;p.gun=p.slots[m.slot].gun;p.packed=!!p.slots[m.slot].packed;
+ broadcastState();
+}
 else if(m.t==='buy'){performBuy(conn.peer,m.kind)}
 else if(m.t==='revive'){attemptRevive(conn.peer,m.target)}
 }
@@ -610,11 +695,15 @@ hostConn.on('data',m=>{if(!m||typeof m!=='object')return;
 if(m.t==='welcome'){mySlot=m.slot;player=newActor(mySlot,myName,peer.id);for(let p of m.people){if(p.id===peer.id){player.x=p.x;player.y=p.y} else otherPlayers.set(p.id,p)}say('Connected to '+m.room);statusRoom();if(m.started){running=true;showReady()}else showLobby('lobby')}
 else if(m.t==='state')applySnapshot(m);
 else if(m.t==='start'){running=true;showReady()}
-else if(m.t==='purchase'){equip(m.gun);reserve=m.reserve;notice(m.notice||'PURCHASE COMPLETE',2)}
-else if(m.t==='refill'){reserve+=m.reserve;notice(m.notice||'AMMUNITION RESTOCKED',2)}
+else if(m.t==='arsenal')applyArsenalMessage(m);
 else if(m.t==='pack'){if(m.gun===gun){packed=true;player.packed=true;ammo=magazineSize(gun,true);
-reserve=reserveSize(gun,true);reloadTime=0;shotCooldown=.3;notice(m.notice||'PACK-A-PUNCH COMPLETE',4);sound(440,.44,'sawtooth',.09,-150)}}
-else if(m.t==='maxammo'){ammo=magazineSize(gun,packed);reserve=reserveSize(gun,packed);reloadTime=0;notice('MAX AMMO!',3)}
+reserve=reserveSize(gun,true);reloadTime=0;shotCooldown=.3;saveCurrentWeapon();notice(m.notice||'PACK-A-PUNCH COMPLETE',4);sound(440,.44,'sawtooth',.09,-150)}}
+else if(m.t==='maxammo'){
+ saveCurrentWeapon();
+ for(const item of weaponSlots)if(item){item.ammo=magazineSize(item.gun,item.packed);item.reserve=reserveSize(item.gun,item.packed)}
+ const active=weaponSlots[activeSlot];if(active){ammo=active.ammo;reserve=active.reserve}
+ reloadTime=0;saveCurrentWeapon();notice('MAX AMMO!',3);
+}
 else if(m.t==='notice')notice(String(m.message).slice(0,80),2);
 else if(m.t==='gameover'){round=m.round;menu('dead')}
 else if(m.t==='reject'){say(m.message||'ROOM REJECTED');if(hostConn)hostConn.close()}});
@@ -646,7 +735,7 @@ window.addEventListener('mousemove',e=>{
 canvas.addEventListener('touchstart',e=>{if(!gameActive()||localPaused)return;isDragging=true;prevMouse=e.touches[0]?.clientX??0;prevMouseY=e.touches[0]?.clientY??0;e.preventDefault()},{passive:false});
 canvas.addEventListener('touchmove',e=>{if(!gameActive()||localPaused)return;let x=e.touches[0]?.clientX??prevMouse,y=e.touches[0]?.clientY??prevMouseY;player.ang+=(x-prevMouse)*.008;player.pitch=clamp(player.pitch-(y-prevMouseY)*.007,-MAX_PITCH,MAX_PITCH);prevMouse=x;prevMouseY=y;e.preventDefault()},{passive:false});
 canvas.addEventListener('touchend',()=>{isDragging=false;mouseHeld=false});
-window.addEventListener('keydown',e=>{if(!root.isConnected)return;let k=e.code;if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(k)&&gameActive())e.preventDefault();if(k==='Escape'&&gameActive()){pauseLocal();return}if(!gameActive()||localPaused)return;held[k]=true;if(k==='KeyR'&&!e.repeat)reload();if(k==='KeyE'&&!e.repeat)interact();if(k==='Space'&&!e.repeat)fire();if(k==='KeyP'&&!e.repeat)pauseLocal()});
+window.addEventListener('keydown',e=>{if(!root.isConnected)return;let k=e.code;if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(k)&&gameActive())e.preventDefault();if(k==='Escape'&&gameActive()){pauseLocal();return}if(!gameActive()||localPaused)return;held[k]=true;if(k==='KeyR'&&!e.repeat)reload();if(k==='Digit1'&&!e.repeat)activateWeaponSlot(0);if(k==='Digit2'&&!e.repeat)activateWeaponSlot(1);if(k==='KeyQ'&&!e.repeat)swapWeapon();if(k==='KeyE'&&!e.repeat)interact();if(k==='Space'&&!e.repeat)fire();if(k==='KeyP'&&!e.repeat)pauseLocal()});
 window.addEventListener('keyup',e=>{held[e.code]=false});window.addEventListener('blur',()=>{held={};mouseHeld=false;if(gameActive())pauseLocal()});
 nameInput.value='SURVIVOR';const codeQuery=new URLSearchParams(location.search).get('room');if(codeQuery){roomInput.value=goodCode(codeQuery);say('Invite detected — enter a name and press JOIN ROOM.')}else say('Create a room or join a friend.');
 reset();showLobby('menu');requestAnimationFrame(frame);
