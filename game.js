@@ -295,7 +295,7 @@ if(role==='host'){lastSnapshot+=dt;if(lastSnapshot>=.10){lastSnapshot=0;broadcas
 
 function cast(rayX,rayY){let mapX=Math.floor(player.x),mapY=Math.floor(player.y),deltaX=Math.abs(1/(rayX||.00001)),deltaY=Math.abs(1/(rayY||.00001)),stepX=rayX<0?-1:1,stepY=rayY<0?-1:1;
 let sideX=(rayX<0?player.x-mapX:mapX+1-player.x)*deltaX,sideY=(rayY<0?player.y-mapY:mapY+1-player.y)*deltaY,side=0;
-for(let count=0;count<28;count++){if(sideX<sideY){sideX+=deltaX;mapX+=stepX;side=0}else{sideY+=deltaY;mapY+=stepY;side=1}if(mapY<0||mapY>=MH||mapX<0||mapX>=MW||map[mapY][mapX]!=='\u002e')break}
+for(let count=0;count<64;count++){if(sideX<sideY){sideX+=deltaX;mapX+=stepX;side=0}else{sideY+=deltaY;mapY+=stepY;side=1}if(mapY<0||mapY>=MH||mapX<0||mapX>=MW||map[mapY][mapX]!=='\u002e')break}
 let d=Math.max(.04,side===0?sideX-deltaX:sideY-deltaY),hit=(side===0?player.y+d*rayY:player.x+d*rayX);return{d,u:hit-Math.floor(hit),side,mapX,mapY}}
 const SW=3,zBuffer=new Float32Array(W/SW);let proj=[];
 function screenOf(x,y){let dx=x-player.x,dy=y-player.y,ca=Math.cos(player.ang),sa=Math.sin(player.ang),depth=dx*ca+dy*sa,side=-dx*sa+dy*ca;return{depth,x:W/2+side/(depth*TAN)*W/2,y:cameraHorizon()+H/(2*depth)}}
@@ -558,7 +558,7 @@ if(kind==='pack'){
   notice('PACK-A-PUNCHED: '+displayGun(currentGun,true),4);
  }else{
   p.packed=true;if(p.slots?.[p.activeSlot]){p.slots[p.activeSlot].packed=true;p.slots[p.activeSlot].ammo=magazineSize(currentGun,true);p.slots[p.activeSlot].reserve=reserveSize(currentGun,true);}
-  sendToId(id,{t:'pack',gun:currentGun,ammo:magazineSize(currentGun,true),reserve:reserveSize(currentGun,true),
+  sendToId(id,{t:'pack',slot:p.activeSlot,gun:currentGun,ammo:magazineSize(currentGun,true),reserve:reserveSize(currentGun,true),
    notice:'PACK-A-PUNCHED: '+displayGun(currentGun,true)});
  }
  sound(190,.34,'sawtooth',.14,470);sound(550,.48,'triangle',.11,-170);
@@ -696,8 +696,15 @@ if(m.t==='welcome'){mySlot=m.slot;player=newActor(mySlot,myName,peer.id);for(let
 else if(m.t==='state')applySnapshot(m);
 else if(m.t==='start'){running=true;showReady()}
 else if(m.t==='arsenal')applyArsenalMessage(m);
-else if(m.t==='pack'){if(m.gun===gun){packed=true;player.packed=true;ammo=magazineSize(gun,true);
-reserve=reserveSize(gun,true);reloadTime=0;shotCooldown=.3;saveCurrentWeapon();notice(m.notice||'PACK-A-PUNCH COMPLETE',4);sound(440,.44,'sawtooth',.09,-150)}}
+else if(m.t==='pack'){
+ if(Number.isInteger(m.slot)&&m.slot>=0&&m.slot<2&&weaponSlots[m.slot]?.gun===m.gun){
+  saveCurrentWeapon();
+  const item=weaponSlots[m.slot];
+  item.packed=true;item.ammo=magazineSize(m.gun,true);item.reserve=reserveSize(m.gun,true);
+  if(m.slot===activeSlot){packed=true;ammo=item.ammo;reserve=item.reserve;reloadTime=0;shotCooldown=.3}
+  saveCurrentWeapon();notice(m.notice||'PACK-A-PUNCH COMPLETE',4);sound(440,.44,'sawtooth',.09,-150);
+ }
+}
 else if(m.t==='maxammo'){
  saveCurrentWeapon();
  for(const item of weaponSlots)if(item){item.ammo=magazineSize(item.gun,item.packed);item.reserve=reserveSize(item.gun,item.packed)}
