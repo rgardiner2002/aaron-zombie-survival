@@ -17,8 +17,34 @@
 #dead-air .room-bar .copy{background:#335944;color:#f5f8ed;border:1px solid #719c70;border-radius:3px;padding:5px 9px}
 #dead-air #da-player-count{color:#b6ceaf}
 
-</style></head><body><div id="dead-air"><div class="top"><div class="logo">DEAD <span>AIR</span> <span class="quiet">// ZOMBIE SURVIVAL</span></div><div class="topright"><span class="quiet">BUNKER 115 · 1963</span><button class="tool" id="da-mute" type="button">♫ Sound On</button><button class="tool" id="da-full" type="button">⛶ Fullscreen</button></div></div><div class="viewport" id="da-viewport"><canvas id="da-scene" width="960" height="540" tabindex="0" aria-label="First person zombie survival game"></canvas><div class="overlay" id="da-overlay"><div class="menu"><div class="eyebrow" id="da-overline">CLASSIFIED // FACILITY 115</div><h1 id="da-title">DEAD AIR</h1><p id="da-description">The bunker has been overrun. Survive endless waves of the undead, earn points and upgrade your arsenal. Don't let them get close.</p><div class="lobby" id="da-lobby"><input id="da-name-input" placeholder="Your player name" maxlength="16" aria-label="Your player name"><div class="lobby-row"><button class="lobby-btn" id="da-host-room" type="button">HOST ROOM</button></div><div class="lobby-row"><input id="da-room-input" maxlength="8" placeholder="ROOM CODE" aria-label="Room code"><button class="lobby-btn" id="da-join-room" type="button">JOIN ROOM</button></div></div>
-<div class="roster" id="da-roster" aria-live="polite"></div><div class="lobby-note" id="da-lobby-message" aria-live="polite"></div><button class="start" id="da-start" type="button">ENTER THE BUNKER</button><div class="keyboard"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span><span><kbd>MOUSE</kbd> Look / Fire</span><span><kbd>R</kbd> Reload</span><span><kbd>E</kbd> Buy</span><span><kbd>SHIFT</kbd> Sprint</span><span><kbd>ESC</kbd> Pause</span></div></div></div></div><div class="room-bar" id="da-room-bar" hidden><b id="da-room-text">NO ROOM</b><button type="button" class="copy" id="da-copy-room">COPY INVITE LINK</button><span id="da-player-count">1/4 SURVIVORS</span></div><div class="below"><span><span class="accent">SURVIVE THE NIGHT</span> · Wall weapons · Mystery box · Perk machine · Endless rounds</span><span class="status" id="da-status">SYSTEM IDLE</span></div></div>
+
+#dead-air{color:#f1e9c5}body{background:#16150d}
+#dead-air .logo span{color:#f9d56c}#dead-air .quiet{color:#bcb38b}
+#dead-air .viewport{border-color:#aa985a;background:#c4b984;box-shadow:0 14px 55px #0807029c}
+#dead-air .overlay{background:radial-gradient(ellipse at center,#554929e0,#211e12ef 74%)}
+#dead-air .eyebrow{color:#ffe58b}#dead-air .start{border-color:#ffdf7e;background:linear-gradient(#f8ebad,#c5ad52);color:#2c270e}
+#dead-air .tool{background:#332f1e;border-color:#82744b;color:#f4e6b2}
+#dead-air .lobby-btn{background:#51452b;border-color:#b4a06e;color:#faf0c5}
+#dead-air #da-host-room{background:#dcc66f;color:#252010;border-color:#ffe49b}
+#dead-air .room-bar{background:#352f1b;border-color:#887a4f}
+#dead-air .room-bar .copy{background:#75623b;border-color:#c3ad73}
+#dead-air .member{background:#4b422b;border-color:#867a51;color:#faf1cd}
+#dead-air .accent{color:#f3da81}
+#dead-air .scoreboard{margin:12px 2px 4px;padding:13px;background:#262317;border:1px solid #82754a;border-radius:7px;color:#f4e9bd}
+#dead-air .scoreboard header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:9px;font-size:13px;font-weight:900;letter-spacing:.16em}
+#dead-air .scoreboard header small{font-size:10px;letter-spacing:.03em;color:#c1b280;font-weight:500}
+#dead-air .score-head,#dead-air .score-entry{display:grid;grid-template-columns:42px minmax(98px,1fr) 110px 70px 66px;gap:8px;align-items:center;padding:7px 9px;font:12px monospace}
+#dead-air .score-head{color:#b7aa7d;font-size:10px;border-bottom:1px solid #87784b}
+#dead-air .score-entry{border-bottom:1px solid #4b452c}
+#dead-air .score-entry span:nth-child(3),#dead-air .score-entry span:nth-child(4){font-variant-numeric:tabular-nums;color:#f4dd94}
+#dead-air .score-entry.is-you{background:#5a502d;border-radius:4px}
+#dead-air .score-empty{font-size:12px;color:#bfb393;padding:9px}
+@media(max-width:550px){#dead-air .score-head,#dead-air .score-entry{grid-template-columns:24px minmax(75px,1fr) 66px 42px 45px;gap:4px;padding:6px 4px;font-size:10px}#dead-air .scoreboard{padding:8px}}
+</style></head><body><div id="dead-air"><div class="top"><div class="logo">DEAD <span>AIR</span> <span class="quiet">// ZOMBIE SURVIVAL</span></div><div class="topright"><span class="quiet">LEVEL 0 · NO EXIT</span><button class="tool" id="da-mute" type="button">♫ Sound On</button><button class="tool" id="da-full" type="button">⛶ Fullscreen</button></div></div><div class="viewport" id="da-viewport"><canvas id="da-scene" width="960" height="540" tabindex="0" aria-label="First person zombie survival game"></canvas><div class="overlay" id="da-overlay"><div class="menu"><div class="eyebrow" id="da-overline">LEVEL 0 // THE YELLOW HALLS</div><h1 id="da-title">DEAD AIR</h1><p id="da-description">The yellow halls never end. Find your way through fluorescent corridors, earn points, upgrade your guns, and survive the things that hunt you.</p><div class="lobby" id="da-lobby"><input id="da-name-input" placeholder="Your player name" maxlength="16" aria-label="Your player name"><div class="lobby-row"><button class="lobby-btn" id="da-host-room" type="button">HOST ROOM</button></div><div class="lobby-row"><input id="da-room-input" maxlength="8" placeholder="ROOM CODE" aria-label="Room code"><button class="lobby-btn" id="da-join-room" type="button">JOIN ROOM</button></div></div>
+<div class="roster" id="da-roster" aria-live="polite"></div><div class="lobby-note" id="da-lobby-message" aria-live="polite"></div><button class="start" id="da-start" type="button">ENTER THE BUNKER</button><div class="keyboard"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span><span><kbd>MOUSE</kbd> Look / Fire</span><span><kbd>R</kbd> Reload</span><span><kbd>E</kbd> Buy</span><span><kbd>SHIFT</kbd> Sprint</span><span><kbd>ESC</kbd> Pause</span></div></div></div></div><div class="room-bar" id="da-room-bar" hidden><b id="da-room-text">NO ROOM</b><button type="button" class="copy" id="da-copy-room">COPY INVITE LINK</button><span id="da-player-count">1/4 SURVIVORS</span></div><div class="below"><span><span class="accent">ESCAPE THE YELLOW HALLS</span> · Wall weapons · Mystery box · Perk machine · Endless rounds</span><span class="status" id="da-status">SYSTEM IDLE</span></div><section class="scoreboard" aria-label="Live co-op leaderboard">
+<header>TEAM LEADERBOARD <small>Ranked by points earned · current room</small></header>
+<div class="score-head"><span>#</span><span>PLAYER</span><span>SCORE</span><span>KILLS</span><span>STATUS</span></div>
+<div id="da-scoreboard" aria-live="polite"></div></section></div>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="game.js?v=20261025-vertical-look-v1"></script>
+<script src="game.js?v=20261026-backrooms-arsenal-leaderboard-v1"></script>
 </body></html>
